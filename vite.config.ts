@@ -45,6 +45,7 @@ function lsWayArcadeApiPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), lsWayArcadeApiPlugin()],
   build: {
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {

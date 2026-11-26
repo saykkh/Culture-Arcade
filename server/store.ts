@@ -5,8 +5,8 @@ import {
   assertContentAssignable,
   DEFAULT_PILOT_CONTENT_VERSION,
   getContentBundle,
-} from '../content'
-import { computeLobbyRecommendation } from '../src/domain/recommendation'
+} from '../content/index.js'
+import { computeLobbyRecommendation } from '../src/domain/recommendation.js'
 import {
   ALL_GAME_IDS,
   BONUS_GAME_ID,
@@ -26,8 +26,8 @@ import {
   SESSION_TTL_MS,
   toKstDateString,
   validateAndNormalizeNickname,
-} from '../src/domain/rules'
-import { RunVerificationError, verifyAndScoreRun } from '../src/domain/scoring'
+} from '../src/domain/rules.js'
+import { RunVerificationError, verifyAndScoreRun } from '../src/domain/scoring.js'
 import type {
   AttemptKind,
   FirstExposureOutcome,
@@ -41,15 +41,17 @@ import type {
   ParticipantProgressRecord,
   RecommendationBanner,
   RunEndReason,
-} from '../src/domain/types'
+} from '../src/domain/types.js'
 import {
   computeCodeLookupDigest,
   computeSessionLookupDigest,
   generateParticipantCode,
   generateSessionToken,
-} from './crypto'
+  verifySignedParticipantToken,
+} from './crypto.js'
 
 export const SAMPLE_VIRTUAL_CODES = {
+  QUICK_TEST: '1111-1111-1111',
   ACTIVE_TODAY: 'LSWY-2026-PLAY',
   FUTURE_START: 'LSWY-2099-WAIT',
 } as const
@@ -157,6 +159,27 @@ export interface FinalizeRunResult {
   recommendation: RecommendationBanner
 }
 
+export interface EphemeralParticipantSync {
+  pid: string
+  nick: string | null
+  firstPlayedAt: string | null
+  compAt: string | null
+  dueComp: string | null
+  prog: ParticipantProgressRecord[]
+  activeRun: {
+    id: string
+    gameId: GameId
+    mode: GameMode
+    ruleVersion: string
+    contentVersion: string
+    seed: number
+    attemptKind: AttemptKind
+    afterBadgeAtStart: boolean
+    startedAt: string
+    expiresAt: string
+  } | null
+}
+
 export class ArcadeApiError extends Error {
   readonly status: number
   readonly code: string
@@ -197,6 +220,7 @@ function createInitialState(requireApprovedContent: boolean): DatabaseState {
     }
   }
 
+  const pQuickId = '00000000-0000-4000-8000-000000000011'
   const p1Id = '00000000-0000-4000-8000-000000000001'
   const p2Id = '00000000-0000-4000-8000-000000000002'
   const createdAt = '2026-11-26T00:00:00.000Z'
@@ -204,6 +228,22 @@ function createInitialState(requireApprovedContent: boolean): DatabaseState {
   return {
     learningVersions: [lv],
     participants: [
+      {
+        id: pQuickId,
+        learningVersionId: lv.id,
+        rosterRef: 'TEST-1111',
+        nickname: null,
+        nicknameKey: null,
+        availableFromDate: '2026-11-20',
+        recommendedDueDate: '2026-12-31',
+        firstSeenAt: null,
+        lastSeenAt: null,
+        firstPlayedAt: null,
+        onboardingCompletedAt: null,
+        dueDateAtCompletion: null,
+        createdAt,
+        isVirtualSample: true,
+      },
       {
         id: p1Id,
         learningVersionId: lv.id,
@@ -238,6 +278,15 @@ function createInitialState(requireApprovedContent: boolean): DatabaseState {
       },
     ],
     credentials: [
+      {
+        id: randomUUID(),
+        participantId: pQuickId,
+        lookupDigest: computeCodeLookupDigest(SAMPLE_VIRTUAL_CODES.QUICK_TEST),
+        generation: 1,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt,
+      },
       {
         id: randomUUID(),
         participantId: p1Id,
@@ -287,6 +336,9 @@ export class ArcadeStore {
       try {
         const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as DatabaseState
         this.state = parsed
+        if (!this.requireApprovedContent) {
+          this.ensureQuickTestParticipant()
+        }
       } catch {
         this.state = createInitialState(this.requireApprovedContent)
         this.persist()
@@ -295,6 +347,46 @@ export class ArcadeStore {
       this.state = createInitialState(this.requireApprovedContent)
       this.persist()
     }
+  }
+
+  private ensureQuickTestParticipant(): void {
+    const quickDigest = computeCodeLookupDigest(SAMPLE_VIRTUAL_CODES.QUICK_TEST)
+    const hasQuickCred = this.state.credentials.some(
+      (c) => c.lookupDigest === quickDigest && c.revokedAt === null,
+    )
+    if (hasQuickCred) return
+
+    const lv = this.state.learningVersions[0]!
+    const pQuickId = '00000000-0000-4000-8000-000000000011'
+    const createdAt = this.clock().toISOString()
+    if (!this.state.participants.some((p) => p.id === pQuickId)) {
+      this.state.participants.unshift({
+        id: pQuickId,
+        learningVersionId: lv.id,
+        rosterRef: 'TEST-1111',
+        nickname: null,
+        nicknameKey: null,
+        availableFromDate: '2026-11-20',
+        recommendedDueDate: '2026-12-31',
+        firstSeenAt: null,
+        lastSeenAt: null,
+        firstPlayedAt: null,
+        onboardingCompletedAt: null,
+        dueDateAtCompletion: null,
+        createdAt,
+        isVirtualSample: true,
+      })
+    }
+    this.state.credentials.push({
+      id: randomUUID(),
+      participantId: pQuickId,
+      lookupDigest: quickDigest,
+      generation: 1,
+      expiresAt: null,
+      revokedAt: null,
+      createdAt,
+    })
+    this.persist()
   }
 
   private persist(): void {
@@ -434,8 +526,13 @@ export class ArcadeStore {
     }
     participant.lastSeenAt = nowIso
 
-    const { token, lookupDigest } = generateSessionToken()
-    const expiresAt = new Date(nowMs + SESSION_TTL_MS).toISOString()
+    const expiresAtMs = nowMs + SESSION_TTL_MS
+    const expiresAt = new Date(expiresAtMs).toISOString()
+    const { token, lookupDigest } = generateSessionToken({
+      participantId: participant.id,
+      generation: credential.generation,
+      expiresAtMs,
+    })
     this.state.sessions.push({
       id: randomUUID(),
       participantId: participant.id,
@@ -466,7 +563,28 @@ export class ArcadeStore {
     const now = this.clock()
     const nowMs = now.getTime()
     const digest = computeSessionLookupDigest(token)
-    const session = this.state.sessions.find((s) => s.lookupDigest === digest)
+    let session = this.state.sessions.find((s) => s.lookupDigest === digest)
+    if (!session) {
+      // Cold serverless lambda fallback: verify HMAC-signed token against active credential generation
+      const verified = verifySignedParticipantToken(token, nowMs)
+      if (verified) {
+        const activeForToken = this.state.credentials.find(
+          (c) => c.participantId === verified.participantId && c.revokedAt === null,
+        )
+        if (activeForToken && activeForToken.generation === verified.generation) {
+          session = {
+            id: randomUUID(),
+            participantId: verified.participantId,
+            lookupDigest: digest,
+            credentialGeneration: verified.generation,
+            expiresAt: new Date(verified.expiresAtMs).toISOString(),
+            revokedAt: null,
+            createdAt: now.toISOString(),
+          }
+          this.state.sessions.push(session)
+        }
+      }
+    }
     if (!session || session.revokedAt !== null || Date.parse(session.expiresAt) <= nowMs) {
       throw new ArcadeApiError(
         401,
@@ -503,6 +621,124 @@ export class ArcadeStore {
     if (session && !session.revokedAt) {
       session.revokedAt = this.clock().toISOString()
       this.persist()
+    }
+  }
+
+  exportEphemeralSync(token: string | undefined): EphemeralParticipantSync | null {
+    try {
+      const p = this.authenticateParticipantSession(token)
+      const prog = this.state.progress.filter((r) => r.participantId === p.id)
+      const latestStarted = [...this.state.runs]
+        .filter((r) => r.participantId === p.id && r.status === 'started')
+        .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]
+      return {
+        pid: p.id,
+        nick: p.nickname,
+        firstPlayedAt: p.firstPlayedAt,
+        compAt: p.onboardingCompletedAt,
+        dueComp: p.dueDateAtCompletion,
+        prog,
+        activeRun: latestStarted
+          ? {
+              id: latestStarted.id,
+              gameId: latestStarted.gameId,
+              mode: latestStarted.mode,
+              ruleVersion: latestStarted.ruleVersion,
+              contentVersion: latestStarted.contentVersion,
+              seed: latestStarted.seed,
+              attemptKind: latestStarted.attemptKind,
+              afterBadgeAtStart: latestStarted.afterBadgeAtStart,
+              startedAt: latestStarted.startedAt,
+              expiresAt: latestStarted.expiresAt,
+            }
+          : null,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  hydrateFromEphemeralSync(
+    token: string | undefined,
+    sync: EphemeralParticipantSync | null,
+  ): void {
+    if (!sync || !token) return
+    let p: StoredParticipant
+    try {
+      p = this.authenticateParticipantSession(token)
+    } catch {
+      return
+    }
+    if (p.id !== sync.pid) return
+
+    if (!p.nickname && sync.nick) {
+      const checked = validateAndNormalizeNickname(sync.nick)
+      if (checked.valid) {
+        p.nickname = checked.display
+        p.nicknameKey = checked.key
+      }
+    }
+    if (!p.firstPlayedAt && sync.firstPlayedAt) {
+      p.firstPlayedAt = sync.firstPlayedAt
+    }
+    if (!p.onboardingCompletedAt && sync.compAt) {
+      p.onboardingCompletedAt = sync.compAt
+      p.dueDateAtCompletion = sync.dueComp
+    }
+
+    for (const incoming of sync.prog) {
+      if (incoming.participantId !== p.id) continue
+      const cur = this.getOrCreateProgress(p.id, incoming.gameId)
+      if (
+        incoming.standardBestScore !== null &&
+        (cur.standardBestScore === null || incoming.standardBestScore > cur.standardBestScore)
+      ) {
+        cur.standardBestScore = incoming.standardBestScore
+        cur.standardBestAchievedAt = incoming.standardBestAchievedAt
+      }
+      if (
+        incoming.assistedBestScore !== null &&
+        (cur.assistedBestScore === null || incoming.assistedBestScore > cur.assistedBestScore)
+      ) {
+        cur.assistedBestScore = incoming.assistedBestScore
+      }
+      if (!cur.firstClearedAt && incoming.firstClearedAt) {
+        cur.firstClearedAt = incoming.firstClearedAt
+      }
+      if (
+        incoming.lastStartedAt &&
+        (!cur.lastStartedAt || Date.parse(incoming.lastStartedAt) > Date.parse(cur.lastStartedAt))
+      ) {
+        cur.lastStartedAt = incoming.lastStartedAt
+      }
+      if (incoming.finalizedAttemptCount > cur.finalizedAttemptCount) {
+        cur.finalizedAttemptCount = incoming.finalizedAttemptCount
+      }
+    }
+
+    if (sync.activeRun && !this.state.runs.some((r) => r.id === sync.activeRun!.id)) {
+      this.state.runs.push({
+        id: sync.activeRun.id,
+        participantId: p.id,
+        gameId: sync.activeRun.gameId,
+        mode: sync.activeRun.mode,
+        ruleVersion: sync.activeRun.ruleVersion,
+        contentVersion: sync.activeRun.contentVersion,
+        seed: sync.activeRun.seed,
+        status: 'started',
+        attemptKind: sync.activeRun.attemptKind,
+        afterBadgeAtStart: sync.activeRun.afterBadgeAtStart,
+        startedAt: sync.activeRun.startedAt,
+        expiresAt: sync.activeRun.expiresAt,
+        finalizedAt: null,
+        endReason: null,
+        renderMode: null,
+        activeDurationMs: null,
+        score: null,
+        cleared: null,
+        actionSummary: null,
+        finalizedResponse: null,
+      })
     }
   }
 

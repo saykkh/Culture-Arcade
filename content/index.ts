@@ -1,14 +1,14 @@
-import type { CoreValueCode, GameMode, LearningDomain } from '../src/domain/types'
-import { APPROVED_CONTENT_TEMPLATE_V04 } from './approved-v04'
-import { SAMPLE_CONTENT_V04 } from './sample-v04'
+import type { CoreValueCode, GameMode, LearningDomain } from '../src/domain/types.js'
+import { APPROVED_CONTENT_TEMPLATE_V04 } from './approved-v04.js'
+import { SAMPLE_CONTENT_V04 } from './sample-v04.js'
 import type {
   LearningContentBundle,
   PhraseLengthClass,
   ShooterQuestionItem,
   SnakeSentenceItem,
-} from './types'
+} from './types.js'
 
-export * from './types'
+export * from './types.js'
 export { SAMPLE_CONTENT_V04, APPROVED_CONTENT_TEMPLATE_V04 }
 
 export const CONTENT_BUNDLES: Record<string, LearningContentBundle> = {

@@ -1,4 +1,4 @@
-import type { LearningContentBundle } from './types'
+import type { LearningContentBundle } from './types.js'
 
 const WAY_SOURCE = 'https://www.lscns.co.kr/kr/intro/lsway.asp#sample-v0.4'
 const PHILOSOPHY_SOURCE =

@@ -5,7 +5,7 @@ import type {
   ParticipantDueStatus,
   ParticipantLearningStatus,
   RequiredGameId,
-} from './types'
+} from './types.js'
 
 export const CURRENT_RULE_VERSION = 'v0.4-pilot.1'
 export const CURRENT_LEARNING_VERSION_ID = 'lv-sample-v0.4-pilot.1'

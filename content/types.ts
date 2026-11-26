@@ -1,4 +1,4 @@
-import type { CoreValueCode, LearningDomain } from '../src/domain/types'
+import type { CoreValueCode, LearningDomain } from '../src/domain/types.js'
 
 export type PhraseLengthClass = 'short' | 'medium' | 'long'
 
