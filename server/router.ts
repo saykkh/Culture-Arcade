@@ -169,6 +169,11 @@ export async function handleApiRequest(
         virtualSamples: !storage.requireApprovedContent
           ? [
               {
+                rosterRef: 'TEST-1111',
+                code: SAMPLE_VIRTUAL_CODES.QUICK_TEST,
+                description: '테스트 빠른 입장 코드 (111111111111)',
+              },
+              {
                 rosterRef: 'DEV-001',
                 code: SAMPLE_VIRTUAL_CODES.ACTIVE_TODAY,
                 description: '즉시 플레이 가능 (시작일 경과)',

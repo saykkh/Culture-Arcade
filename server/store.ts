@@ -50,6 +50,7 @@ import {
 } from './crypto'
 
 export const SAMPLE_VIRTUAL_CODES = {
+  QUICK_TEST: '1111-1111-1111',
   ACTIVE_TODAY: 'LSWY-2026-PLAY',
   FUTURE_START: 'LSWY-2099-WAIT',
 } as const
@@ -197,6 +198,7 @@ function createInitialState(requireApprovedContent: boolean): DatabaseState {
     }
   }
 
+  const pQuickId = '00000000-0000-4000-8000-000000000011'
   const p1Id = '00000000-0000-4000-8000-000000000001'
   const p2Id = '00000000-0000-4000-8000-000000000002'
   const createdAt = '2026-11-26T00:00:00.000Z'
@@ -204,6 +206,22 @@ function createInitialState(requireApprovedContent: boolean): DatabaseState {
   return {
     learningVersions: [lv],
     participants: [
+      {
+        id: pQuickId,
+        learningVersionId: lv.id,
+        rosterRef: 'TEST-1111',
+        nickname: null,
+        nicknameKey: null,
+        availableFromDate: '2026-11-20',
+        recommendedDueDate: '2026-12-31',
+        firstSeenAt: null,
+        lastSeenAt: null,
+        firstPlayedAt: null,
+        onboardingCompletedAt: null,
+        dueDateAtCompletion: null,
+        createdAt,
+        isVirtualSample: true,
+      },
       {
         id: p1Id,
         learningVersionId: lv.id,
@@ -238,6 +256,15 @@ function createInitialState(requireApprovedContent: boolean): DatabaseState {
       },
     ],
     credentials: [
+      {
+        id: randomUUID(),
+        participantId: pQuickId,
+        lookupDigest: computeCodeLookupDigest(SAMPLE_VIRTUAL_CODES.QUICK_TEST),
+        generation: 1,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt,
+      },
       {
         id: randomUUID(),
         participantId: p1Id,
@@ -287,6 +314,9 @@ export class ArcadeStore {
       try {
         const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as DatabaseState
         this.state = parsed
+        if (!this.requireApprovedContent) {
+          this.ensureQuickTestParticipant()
+        }
       } catch {
         this.state = createInitialState(this.requireApprovedContent)
         this.persist()
@@ -295,6 +325,46 @@ export class ArcadeStore {
       this.state = createInitialState(this.requireApprovedContent)
       this.persist()
     }
+  }
+
+  private ensureQuickTestParticipant(): void {
+    const quickDigest = computeCodeLookupDigest(SAMPLE_VIRTUAL_CODES.QUICK_TEST)
+    const hasQuickCred = this.state.credentials.some(
+      (c) => c.lookupDigest === quickDigest && c.revokedAt === null,
+    )
+    if (hasQuickCred) return
+
+    const lv = this.state.learningVersions[0]!
+    const pQuickId = '00000000-0000-4000-8000-000000000011'
+    const createdAt = this.clock().toISOString()
+    if (!this.state.participants.some((p) => p.id === pQuickId)) {
+      this.state.participants.unshift({
+        id: pQuickId,
+        learningVersionId: lv.id,
+        rosterRef: 'TEST-1111',
+        nickname: null,
+        nicknameKey: null,
+        availableFromDate: '2026-11-20',
+        recommendedDueDate: '2026-12-31',
+        firstSeenAt: null,
+        lastSeenAt: null,
+        firstPlayedAt: null,
+        onboardingCompletedAt: null,
+        dueDateAtCompletion: null,
+        createdAt,
+        isVirtualSample: true,
+      })
+    }
+    this.state.credentials.push({
+      id: randomUUID(),
+      participantId: pQuickId,
+      lookupDigest: quickDigest,
+      generation: 1,
+      expiresAt: null,
+      revokedAt: null,
+      createdAt,
+    })
+    this.persist()
   }
 
   private persist(): void {
