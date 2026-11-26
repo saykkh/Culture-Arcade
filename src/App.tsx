@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { isValidGameId } from './domain/rules'
 import { arcadeApi, type ParticipantMeResponse } from './lib/api'
+import { setArcadeBgmTrack } from './lib/sound'
 import { AdminPage } from './pages/AdminPage'
 import { ArcadeLobbyPage } from './pages/ArcadeLobbyPage'
 import { CodeEntryPage } from './pages/CodeEntryPage'
@@ -69,6 +70,26 @@ export function App() {
     setJustLitGameId(null)
     navigate('/')
   }, [navigate])
+
+  // Switch arcade BGM track automatically by current screen / active game!
+  useEffect(() => {
+    if (booting) return
+    if (pathname === '/admin') {
+      setArcadeBgmTrack('none')
+      return
+    }
+    const participantReady = Boolean(me && !me.beforeStartDate && !me.requiresNickname)
+    if (!participantReady || pathname === '/') {
+      setArcadeBgmTrack('landing')
+      return
+    }
+    const gm = pathname.match(/^\/games\/([a-z0-9-]+)$/)
+    if (gm && isValidGameId(gm[1]!)) {
+      setArcadeBgmTrack(gm[1]!)
+      return
+    }
+    setArcadeBgmTrack('lobby')
+  }, [booting, me, pathname])
 
   if (booting) {
     return (

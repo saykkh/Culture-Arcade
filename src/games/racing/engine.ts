@@ -1,5 +1,6 @@
-import { buildRacingPlan, getContentBundle, mulberry32, type ScheduledRacingPlan } from '../../../content'
-import type { GameMode, RacingRunEvent, RunEndReason } from '../../domain/types'
+import { buildRacingPlan, getContentBundle, mulberry32, type ScheduledRacingPlan } from '../../../content/index.js'
+import { BASE_ACTION_POINTS } from '../../domain/rules.js'
+import type { GameMode, RacingRunEvent, RunEndReason } from '../../domain/types.js'
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
@@ -44,10 +45,10 @@ export interface RacingStateSnapshot {
   endReason: RunEndReason | null
 }
 
-export const COURSE_LENGTH_M = 5_800
-export const CHECKPOINT_Z: readonly [number, number, number] = [1_350, 2_850, 4_550]
-export const GATE_ZONE_START_Z = 2_920
-export const GATE_ZONE_END_Z = 3_320
+export const COURSE_LENGTH_M = 6_500
+export const CHECKPOINT_Z: readonly [number, number, number] = [1_450, 3_050, 5_050]
+export const GATE_ZONE_START_Z = 3_120
+export const GATE_ZONE_END_Z = 3_520
 
 /**
  * 3D와 간소화 2D 화면이 100% 동일한 차선·속도·추월·충돌·게이트 판정을 공유하는 순수 레이싱 시뮬레이션 엔진
@@ -121,10 +122,10 @@ export class RacingSimulation {
     const rng = mulberry32(seed ^ 0x2f6e2b1)
     const items: TrackEntity[] = []
 
-    // Place 15 overtake vehicles outside gate zone [2920..3320]
+    // Place 20 overtake vehicles (+2pt each = max 40pt!) outside gate zone [3120..3520]
     const vehicleZPositions = [
-      360, 620, 880, 1140, 1520, 1800, 2080, 2360, 2640,
-      3540, 3840, 4140, 4440, 4880, 5240,
+      320, 560, 800, 1040, 1280, 1600, 1840, 2080, 2320, 2560, 2820,
+      3720, 3980, 4240, 4500, 4760, 5200, 5500, 5800, 6100,
     ]
     vehicleZPositions.forEach((vz, idx) => {
       const lane = (Math.floor(rng() * 3) as TunnelLane)
@@ -139,7 +140,7 @@ export class RacingSimulation {
     })
 
     // Place 8 obstacles in lanes that never block all 3 lanes simultaneously
-    const obstacleZPositions = [500, 1010, 1660, 2220, 2760, 3690, 4300, 5060]
+    const obstacleZPositions = [440, 920, 1720, 2200, 2700, 3850, 4630, 5650]
     obstacleZPositions.forEach((oz, idx) => {
       const lane = ((Math.floor(rng() * 3) + 1) % 3) as TunnelLane
       items.push({
@@ -318,7 +319,10 @@ export class RacingSimulation {
   }
 
   getSnapshot(): RacingStateSnapshot {
-    const netScore = Math.max(0, this.overtakeCount * 100 - this.collisionCount * 50)
+    const netScore = Math.max(
+      0,
+      this.overtakeCount * BASE_ACTION_POINTS - this.collisionCount * 1,
+    )
     return {
       isPractice: this.isPractice,
       z: this.z,

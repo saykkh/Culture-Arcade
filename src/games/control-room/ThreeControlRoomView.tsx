@@ -16,6 +16,31 @@ interface ThreeControlRoomViewProps {
   onWebglError: (reason: string) => void
 }
 
+function makeSignTexture(title: string, subtitle: string, accent: string): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 128
+  const ctx = c.getContext('2d')
+  if (ctx) {
+    ctx.fillStyle = '#0c1524'
+    ctx.fillRect(0, 0, 256, 128)
+    ctx.strokeStyle = accent
+    ctx.lineWidth = 6
+    ctx.strokeRect(4, 4, 248, 120)
+    ctx.fillStyle = accent
+    ctx.font = '800 44px "IBM Plex Mono", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(title, 128, 48)
+    ctx.fillStyle = '#F2F6FB'
+    ctx.font = '700 22px Pretendard, "Malgun Gothic", sans-serif'
+    ctx.fillText(subtitle, 128, 94)
+  }
+  const tex = new THREE.CanvasTexture(c)
+  tex.needsUpdate = true
+  return tex
+}
+
 export default function ThreeControlRoomView({
   snapshot,
   paused,
@@ -109,41 +134,46 @@ export default function ThreeControlRoomView({
       target: { kind: 'clue', label: '중앙 콘솔 · 현재 단서 확인' },
     })
 
-    // 2) 4 C.O.R.E. Wall Panels arranged along left & right walls
+    // 2) 4 C.O.R.E. Wall Panels arranged along left & right walls with glowing letter signs!
     const panelSpecs: Array<{
       code: CoreValueCode
+      shortKo: string
       pos: [number, number, number]
+      signRotY: number
       color: string
     }> = [
-      { code: 'C', pos: [-4.6, 1.7, 1.5], color: '#43E7F2' },
-      { code: 'O', pos: [-4.6, 1.7, -2.0], color: '#B9F66C' },
-      { code: 'R', pos: [4.6, 1.7, 1.5], color: '#FFBD64' },
-      { code: 'E', pos: [4.6, 1.7, -2.0], color: '#FF6B9E' },
+      { code: 'C', shortKo: '고객 최우선', pos: [-4.6, 1.7, 1.5], signRotY: Math.PI / 2, color: '#43E7F2' },
+      { code: 'O', shortKo: '열린 협력', pos: [-4.6, 1.7, -2.0], signRotY: Math.PI / 2, color: '#B9F66C' },
+      { code: 'R', shortKo: '원칙과 책임', pos: [4.6, 1.7, 1.5], signRotY: -Math.PI / 2, color: '#FFBD64' },
+      { code: 'E', shortKo: '실행·전문성', pos: [4.6, 1.7, -2.0], signRotY: -Math.PI / 2, color: '#FF6B9E' },
     ]
     const panelMeshes = new Map<CoreValueCode, THREE.Mesh>()
     for (const p of panelSpecs) {
+      const signTex = makeSignTexture(`[${p.code}]`, p.shortKo, p.color)
       const mat = new THREE.MeshStandardMaterial({
-        color: p.color,
+        map: signTex,
         roughness: 0.35,
-        emissive: '#09101a',
+        emissive: '#101b2c',
       })
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.4, 1.4), mat)
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.45, 1.85), mat)
       mesh.position.set(p.pos[0], p.pos[1], p.pos[2])
       scene.add(mesh)
       panelMeshes.set(p.code, mesh)
       interactiveMeshes.push({
         mesh,
-        target: { kind: 'panel', code: p.code, label: `[${p.code}] 핵심가치 제어 패널` },
+        target: { kind: 'panel', code: p.code, label: `[${p.code}] ${p.shortKo} 제어 패널` },
       })
     }
 
-    // 3) Exit Door on North Wall (z = -5.7)
+    // 3) Exit Door on North Wall (z = -5.7) with EXIT sign
+    const exitSignTex = makeSignTexture('EXIT', '관제실 출구', '#B9F66C')
     const exitMat = new THREE.MeshStandardMaterial({
-      color: '#323f52',
+      map: exitSignTex,
+      color: '#9fb3c8',
       emissive: '#1a1020',
       roughness: 0.4,
     })
-    const exitMesh = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.8, 0.35), exitMat)
+    const exitMesh = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.8, 0.35), exitMat)
     exitMesh.position.set(0, 1.4, -5.75)
     scene.add(exitMesh)
     interactiveMeshes.push({

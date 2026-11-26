@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, PinballRunEvent, RunEndReason } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
 import { playArcadeSfx } from '../../lib/sound'
@@ -54,7 +55,7 @@ export function PinballGame({
     return () => document.removeEventListener('visibilitychange', onVisChange)
   }, [sim])
 
-  // Keyboard controls: Left/Right hold flipper up, release drops flipper; Space launches ball
+  // Keyboard controls: Left/A/Z = Left Flipper, Right/D/X// = Right Flipper, Space/Enter = Launch
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (finishedRef.current || practiceCleared) return
@@ -67,15 +68,30 @@ export function PinballGame({
         return
       }
 
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+      if (
+        e.key === 'ArrowLeft' ||
+        e.key === 'a' ||
+        e.key === 'A' ||
+        e.key === 'z' ||
+        e.key === 'Z'
+      ) {
         e.preventDefault()
         e.stopPropagation()
+        if (!e.repeat) playArcadeSfx('select')
         sim.setFlipperPressed('left', true)
-      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      } else if (
+        e.key === 'ArrowRight' ||
+        e.key === 'd' ||
+        e.key === 'D' ||
+        e.key === 'x' ||
+        e.key === 'X' ||
+        e.key === '/'
+      ) {
         e.preventDefault()
         e.stopPropagation()
+        if (!e.repeat) playArcadeSfx('select')
         sim.setFlipperPressed('right', true)
-      } else if (e.key === ' ') {
+      } else if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowUp') {
         e.preventDefault()
         e.stopPropagation()
         if (sim.launchBall()) {
@@ -86,9 +102,22 @@ export function PinballGame({
     }
 
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+      if (
+        e.key === 'ArrowLeft' ||
+        e.key === 'a' ||
+        e.key === 'A' ||
+        e.key === 'z' ||
+        e.key === 'Z'
+      ) {
         sim.setFlipperPressed('left', false)
-      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      } else if (
+        e.key === 'ArrowRight' ||
+        e.key === 'd' ||
+        e.key === 'D' ||
+        e.key === 'x' ||
+        e.key === 'X' ||
+        e.key === '/'
+      ) {
         sim.setFlipperPressed('right', false)
       }
     }
@@ -152,7 +181,7 @@ export function PinballGame({
     return () => window.cancelAnimationFrame(rafId)
   }, [isPractice, onFinishRound, onPracticeSuccess, onPracticeTimeUp, practiceCleared, sim, tabPaused])
 
-  // Render 2D Pinball Table (clear view of ball + 2 flippers + 4 named bumpers + final-letter guide arc!)
+  // Render Pinball Table with Launch Chute, Center Save Post, Flippers, and 4 C.O.R.E. Bumpers
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -160,24 +189,61 @@ export function PinballGame({
     if (!ctx) return
 
     ctx.fillStyle =
-      snapshot.justCompletedSetFlash && !prefs.reduceMotion ? '#132419' : '#0b0e1a'
+      snapshot.justCompletedSetFlash && !prefs.reduceMotion ? '#10261b' : '#090d18'
     ctx.fillRect(0, 0, PINBALL_WIDTH, PINBALL_HEIGHT)
 
-    // Outer walls & angled inlanes
+    // Subtle neon grid backdrop inside playfield
+    ctx.strokeStyle = 'rgba(67, 231, 242, 0.06)'
+    ctx.lineWidth = 1
+    for (let x = 60; x < 488; x += 60) {
+      ctx.beginPath()
+      ctx.moveTo(x, 20)
+      ctx.lineTo(x, PINBALL_HEIGHT - 16)
+      ctx.stroke()
+    }
+
+    // Outer Table Frame + Right Plunger Chute Divider (x = 488)
     ctx.strokeStyle = snapshot.justCompletedSetFlash ? '#B9F66C' : '#43E7F2'
     ctx.lineWidth = 3
-    ctx.strokeRect(20, 20, PINBALL_WIDTH - 40, PINBALL_HEIGHT - 16)
+    ctx.strokeRect(20, 20, PINBALL_WIDTH - 36, PINBALL_HEIGHT - 24)
 
-    ctx.strokeStyle = 'rgba(242, 246, 251, 0.45)'
-    ctx.lineWidth = 4
+    // Launch chute divider & curved top deflector arch
+    ctx.strokeStyle = 'rgba(67, 231, 242, 0.65)'
+    ctx.lineWidth = 3
     ctx.beginPath()
-    ctx.moveTo(20, 275)
-    ctx.lineTo(132, 366)
-    ctx.moveTo(PINBALL_WIDTH - 20, 275)
-    ctx.lineTo(348, 366)
+    ctx.moveTo(488, 108)
+    ctx.lineTo(488, PINBALL_HEIGHT - 6)
+    ctx.moveTo(476, 20)
+    ctx.quadraticCurveTo(522, 24, 524, 76)
     ctx.stroke()
 
-    // Highlighted recommended guide path when only 1 letter remains (or in practice)!
+    // Launch chute spring graphic
+    ctx.fillStyle = snapshot.ballWaitingLaunch ? '#FFBD64' : '#2a3852'
+    ctx.fillRect(496, PINBALL_HEIGHT - 34, 20, 24)
+
+    // Slingshot angled side inlanes feeding onto flippers
+    ctx.strokeStyle = 'rgba(242, 246, 251, 0.55)'
+    ctx.lineWidth = 4.5
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(20, 286)
+    ctx.lineTo(128, 392)
+    ctx.moveTo(488, 286)
+    ctx.lineTo(380, 392)
+    ctx.stroke()
+
+    // Center Energy Save Post between flippers
+    ctx.fillStyle = snapshot.centerPostReady
+      ? 'rgba(67, 231, 242, 0.35)'
+      : 'rgba(255, 255, 255, 0.08)'
+    ctx.strokeStyle = snapshot.centerPostReady ? '#43E7F2' : '#46546b'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(254, 412, 10, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // Final-letter recommended shot guide arc
     if (snapshot.highlightedFinalLetter) {
       const target = snapshot.bumpers.find(
         (b) => b.letter === snapshot.highlightedFinalLetter,
@@ -186,58 +252,58 @@ export function PinballGame({
         const fromFlipper =
           target.preferredFlipper === 'left' ? snapshot.leftFlipper : snapshot.rightFlipper
         const startX =
-          fromFlipper.pivotX + (target.preferredFlipper === 'left' ? 42 : -42)
-        const startY = fromFlipper.pivotY - 12
+          fromFlipper.pivotX + (target.preferredFlipper === 'left' ? 48 : -48)
+        const startY = fromFlipper.pivotY - 14
 
         ctx.strokeStyle = '#FFBD64'
         ctx.lineWidth = 3
         ctx.setLineDash([7, 6])
         ctx.beginPath()
         ctx.moveTo(startX, startY)
-        ctx.quadraticCurveTo(PINBALL_WIDTH / 2, (startY + target.y) / 2 - 20, target.x, target.y)
+        ctx.quadraticCurveTo(254, (startY + target.y) / 2 - 24, target.x, target.y)
         ctx.stroke()
         ctx.setLineDash([])
       }
     }
 
-    // 4 C.O.R.E. Bumpers with letter + Korean core-value name
+    // 4 C.O.R.E. Bumpers
     for (const bumper of snapshot.bumpers) {
       const collected = snapshot.currentSetLetters.includes(bumper.letter)
       const isFinalTarget = snapshot.highlightedFinalLetter === bumper.letter
 
       ctx.fillStyle = collected
-        ? 'rgba(185, 246, 108, 0.25)'
+        ? 'rgba(185, 246, 108, 0.28)'
         : isFinalTarget
-          ? 'rgba(255, 189, 100, 0.28)'
-          : '#1a2035'
+          ? 'rgba(255, 189, 100, 0.3)'
+          : '#182138'
       ctx.strokeStyle = collected
         ? '#B9F66C'
         : isFinalTarget
           ? '#FFBD64'
           : '#43E7F2'
-      ctx.lineWidth = isFinalTarget ? 4 : 2.5
+      ctx.lineWidth = isFinalTarget ? 4 : 2.8
       ctx.beginPath()
       ctx.arc(bumper.x, bumper.y, bumper.radius, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
 
       ctx.fillStyle = collected ? '#B9F66C' : isFinalTarget ? '#FFBD64' : '#F2F6FB'
-      ctx.font = '800 18px "IBM Plex Mono", sans-serif'
+      ctx.font = '800 19px "IBM Plex Mono", sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(bumper.letter, bumper.x, bumper.y - 4)
+      ctx.fillText(bumper.letter, bumper.x, bumper.y - 5)
 
       ctx.fillStyle = '#D7E2F0'
-      ctx.font = '700 10px Pretendard, "Malgun Gothic", sans-serif'
+      ctx.font = '700 11px Pretendard, "Malgun Gothic", sans-serif'
       ctx.fillText(bumper.labelKo, bumper.x, bumper.y + 13)
     }
 
-    // Draw Left & Right Flippers
+    // Left & Right Flippers
     const drawFlipper = (f: typeof snapshot.leftFlipper) => {
       const tipX = f.pivotX + Math.cos(f.angleRad) * f.length
       const tipY = f.pivotY + Math.sin(f.angleRad) * f.length
       ctx.strokeStyle = f.pressed ? '#B9F66C' : '#43E7F2'
-      ctx.lineWidth = 11
+      ctx.lineWidth = 13
       ctx.lineCap = 'round'
       ctx.beginPath()
       ctx.moveTo(f.pivotX, f.pivotY)
@@ -247,11 +313,14 @@ export function PinballGame({
     drawFlipper(snapshot.leftFlipper)
     drawFlipper(snapshot.rightFlipper)
 
-    // Draw Ball
-    ctx.fillStyle = '#F2F6FB'
+    // Glowing Silver/Cyan Ball
+    ctx.fillStyle = '#FFFFFF'
+    ctx.shadowColor = '#43E7F2'
+    ctx.shadowBlur = prefs.reduceMotion ? 0 : 10
     ctx.beginPath()
     ctx.arc(snapshot.ballX, snapshot.ballY, snapshot.ballRadius, 0, Math.PI * 2)
     ctx.fill()
+    ctx.shadowBlur = 0
   }, [prefs.reduceMotion, snapshot])
 
   const remainSec = Math.max(
@@ -264,21 +333,18 @@ export function PinballGame({
       {/* HUD */}
       <div className="play-hud-bar">
         <div className="hud-metric">
-          <span style={{ color: 'var(--text-muted)' }}>현재 행동</span>
+          <span style={{ color: 'var(--text-muted)' }}>통과 목표 ({PASSING_SCORE}점)</span>
           <strong
             style={{
-              color: snapshot.completedSets >= 1 ? 'var(--accent-clear)' : 'var(--accent-select)',
+              color: snapshot.cleared ? 'var(--accent-clear)' : 'var(--accent-select)',
             }}
           >
             {isPractice
               ? `연습 범퍼 명중 ${practiceCleared ? 1 : 0}/1`
-              : `밝힌 글자 ${snapshot.currentSetLetters.length}/4 · 완성 세트 ${snapshot.completedSets}개`}
+              : snapshot.cleared
+                ? `✓ 통과 달성! · 세트 ${snapshot.completedSets}개 (추가 경쟁 중)`
+                : `현재 ${snapshot.score}/${PASSING_SCORE}점 · 밝힌 글자 ${snapshot.currentSetLetters.length}/4`}
           </strong>
-          {!isPractice && snapshot.missingLetters.length > 0 && (
-            <span style={{ fontSize: 13, color: 'var(--accent-warn)' }}>
-              (남은 글자: {snapshot.missingLetters.join(' · ')})
-            </span>
-          )}
         </div>
 
         <div className="hud-metric" style={{ justifyContent: 'center' }}>
@@ -296,8 +362,8 @@ export function PinballGame({
                 {'●'.repeat(snapshot.ballsRemaining)}{'○'.repeat(3 - snapshot.ballsRemaining)} ({snapshot.ballsRemaining}/3)
               </span>
               <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>점수</span>
-              <span className="mono-num" style={{ fontSize: 20, color: 'var(--accent-clear)' }}>
-                {snapshot.score}
+              <span className="mono-num" style={{ fontSize: 22, color: 'var(--accent-clear)' }}>
+                {snapshot.score}점
               </span>
             </>
           )}
@@ -307,12 +373,12 @@ export function PinballGame({
       {snapshot.justCompletedSetFlash && (
         <div className="status-alert clear">
           <span>
-            ⚡ <strong>C.O.R.E. 완성! (+500점 세트 보너스)</strong> 고객 최우선(C) · 존중과 열린 협력(O) · 원칙과 책임(R) · 실행과 전문성(E) 세트가 완성되었습니다!
+            ⚡ <strong>C.O.R.E. 세트 완성! (+4점 보너스)</strong> 남은 공과 시간으로 추가 점수를 계속 쌓아 보세요!
           </span>
         </div>
       )}
 
-      {/* Playfield + Controls */}
+      {/* Playfield + Side Guide */}
       <div
         style={{
           position: 'relative',
@@ -320,9 +386,9 @@ export function PinballGame({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 18,
-          background: '#080b14',
-          border: '1px solid rgba(67, 231, 242, 0.25)',
+          gap: 20,
+          background: '#070a13',
+          border: '1px solid rgba(67, 231, 242, 0.28)',
           borderRadius: 10,
           padding: 10,
           overflow: 'hidden',
@@ -332,11 +398,30 @@ export function PinballGame({
           ref={canvasRef}
           width={PINBALL_WIDTH}
           height={PINBALL_HEIGHT}
-          style={{ maxHeight: 375, width: 'auto', borderRadius: 8, display: 'block' }}
-          aria-label="C.O.R.E. 핀볼 테이블"
+          onClick={(e) => {
+            if (snapshot.ballWaitingLaunch) {
+              if (sim.launchBall()) {
+                playArcadeSfx('start')
+                setSnapshot(sim.getSnapshot())
+              }
+              return
+            }
+            const rect = e.currentTarget.getBoundingClientRect()
+            const side = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right'
+            playArcadeSfx('select')
+            sim.setFlipperPressed(side, true)
+            window.setTimeout(() => sim.setFlipperPressed(side, false), 220)
+          }}
+          style={{
+            maxHeight: 420,
+            width: 'auto',
+            borderRadius: 8,
+            display: 'block',
+            cursor: 'pointer',
+          }}
+          aria-label="C.O.R.E. 핀볼 테이블 (좌/우 클릭으로도 플리퍼 조작 가능)"
         />
 
-        {/* Side Guide Panel */}
         <div style={{ maxWidth: 270, display: 'grid', gap: 10 }}>
           <div
             style={{
@@ -347,7 +432,10 @@ export function PinballGame({
             }}
           >
             <div style={{ fontWeight: 800, marginBottom: 6, color: 'var(--accent-select)' }}>
-              C·O·R·E 세트 현황
+              배점 및 C·O·R·E 현황
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+              범퍼 명중 <strong>+2점</strong> · 4글자 완성 <strong>+4점 보너스</strong> (10점 통과!)
             </div>
             <div style={{ display: 'grid', gap: 5, fontSize: 13 }}>
               {snapshot.bumpers.map((b) => {
@@ -383,7 +471,7 @@ export function PinballGame({
                 }
               }}
             >
-              Space · 공 발사하기 ▶
+              Space · 다음 공 발사하기 ▶
             </button>
           )}
 
@@ -391,7 +479,10 @@ export function PinballGame({
             <button
               type="button"
               className="btn-arcade"
-              onMouseDown={() => sim.setFlipperPressed('left', true)}
+              onMouseDown={() => {
+                playArcadeSfx('select')
+                sim.setFlipperPressed('left', true)
+              }}
               onMouseUp={() => sim.setFlipperPressed('left', false)}
               onMouseLeave={() => sim.setFlipperPressed('left', false)}
             >
@@ -400,7 +491,10 @@ export function PinballGame({
             <button
               type="button"
               className="btn-arcade"
-              onMouseDown={() => sim.setFlipperPressed('right', true)}
+              onMouseDown={() => {
+                playArcadeSfx('select')
+                sim.setFlipperPressed('right', true)
+              }}
               onMouseUp={() => sim.setFlipperPressed('right', false)}
               onMouseLeave={() => sim.setFlipperPressed('right', false)}
             >

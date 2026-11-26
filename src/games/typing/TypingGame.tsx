@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildTypingSchedule, getContentBundle } from '../../../content'
-import { normalizePhraseInput } from '../../domain/rules'
+import { BASE_ACTION_POINTS, normalizePhraseInput, PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, RunEndReason, TypingRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
 import { playArcadeSfx } from '../../lib/sound'
@@ -250,13 +250,13 @@ export function TypingGame({
         }
         setFeedback({
           tone: 'ok',
-          text: `⚡ ${nextCombo}연속 정확 입력! 전류 증폭 발동 (+100점)`,
+          text: `⚡ ${nextCombo}연속 정확 입력! 전류 증폭 발동 (+${BASE_ACTION_POINTS}점)`,
         })
       } else {
         playArcadeSfx('score')
         setFeedback({
           tone: 'ok',
-          text: `✓ "${target.displayKo}" 연결 성공 (+100점)`,
+          text: `✓ "${target.displayKo}" 연결 성공 (+${BASE_ACTION_POINTS}점)`,
         })
       }
 
@@ -289,8 +289,9 @@ export function TypingGame({
   }
 
   const remainingSec = Math.max(0, Math.ceil((maxDurationMs - elapsedMs) / 1000))
-  const score = clearedSlotIds.length * 100
-  const connectedSegments = Math.min(10, clearedSlotIds.length)
+  const score = clearedSlotIds.length * BASE_ACTION_POINTS
+  const cleared = score >= PASSING_SCORE
+  const connectedSegments = Math.min(5, clearedSlotIds.length)
 
   return (
     <div
@@ -309,15 +310,17 @@ export function TypingGame({
       {/* HUD */}
       <div className="play-hud-bar">
         <div className="hud-metric">
-          <span style={{ color: 'var(--text-muted)' }}>현재 행동</span>
-          <strong style={{ color: clearedSlotIds.length >= 10 ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
+          <span style={{ color: 'var(--text-muted)' }}>통과 목표 ({PASSING_SCORE}점)</span>
+          <strong style={{ color: cleared ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
             {isPractice
               ? `연습 문구 ${practiceCleared ? 1 : 0}/1`
-              : `정확히 입력 ${clearedSlotIds.length}/10`}
+              : cleared
+                ? `✓ 통과 달성! · 입력 ${clearedSlotIds.length}개 (고득점 경쟁 중)`
+                : `정확히 입력 ${clearedSlotIds.length}/5 (${score}/${PASSING_SCORE}점)`}
           </strong>
           {!isPractice && (
             <span className="mono-num" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              (전체 {clearedSlotIds.length + missedSlotIds.length}/16 · 놓침 {missedSlotIds.length}/5)
+              (전체 {clearedSlotIds.length + missedSlotIds.length}/{schedule.length} · 놓침 {missedSlotIds.length}/5)
             </span>
           )}
         </div>
@@ -343,32 +346,32 @@ export function TypingGame({
           {!isPractice && (
             <>
               <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>점수</span>
-              <span className="mono-num" style={{ fontSize: 20, color: 'var(--accent-clear)' }}>
-                {score}
+              <span className="mono-num" style={{ fontSize: 22, color: 'var(--accent-clear)' }}>
+                {score}점
               </span>
             </>
           )}
         </div>
       </div>
 
-      {/* In-Monitor 10-Segment Cable Progress */}
+      {/* In-Monitor 5-Segment Passing Cable Progress */}
       {!isPractice && (
         <div
-          aria-label={`모니터 내 케이블 연결 ${connectedSegments}/10`}
+          aria-label={`모니터 내 통과 케이블 연결 ${connectedSegments}/5`}
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(10, 1fr)',
-            gap: 4,
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: 6,
             padding: '0 2px',
           }}
         >
-          {Array.from({ length: 10 }, (_, idx) => {
+          {Array.from({ length: 5 }, (_, idx) => {
             const lit = idx < connectedSegments
             return (
               <div
                 key={idx}
                 style={{
-                  height: 7,
+                  height: 8,
                   borderRadius: 4,
                   background: lit ? 'var(--accent-clear)' : '#1a2333',
                   boxShadow: lit ? '0 0 8px rgba(185, 246, 108, 0.45)' : undefined,
@@ -379,12 +382,12 @@ export function TypingGame({
         </div>
       )}
 
-      {/* Falling Phrase Stage */}
+      {/* Falling Phrase Stage (4 non-overlapping columns!) */}
       <div
         style={{
           position: 'relative',
           flex: 1,
-          minHeight: 300,
+          minHeight: 340,
           background: 'linear-gradient(180deg, #090e17 0%, #0e1624 88%, #1a1824 100%)',
           border: '1px solid rgba(67, 231, 242, 0.24)',
           borderRadius: 10,
@@ -393,8 +396,9 @@ export function TypingGame({
       >
         {visibleSlots.map((slot) => {
           const progress = Math.min(1, Math.max(0, (elapsedMs - slot.spawnMs) / slot.fallDurationMs))
-          const topPct = 6 + progress * 76
-          const leftPct = isPractice ? 22 : 4 + slot.lane * 22
+          const topPct = 6 + progress * 75
+          const leftPct = isPractice ? 25 : 1.5 + slot.lane * 24.5
+          const widthPct = isPractice ? 50 : 23
           const nearBottom = progress >= 0.75
           return (
             <div
@@ -403,14 +407,16 @@ export function TypingGame({
                 position: 'absolute',
                 top: `${topPct}%`,
                 left: `${leftPct}%`,
-                maxWidth: isPractice ? '56%' : '48%',
-                padding: '7px 12px',
+                width: `${widthPct}%`,
+                padding: '8px 11px',
                 borderRadius: 8,
-                background: nearBottom ? '#2a1d1c' : '#152234',
+                background: nearBottom ? 'rgba(46, 26, 24, 0.95)' : 'rgba(18, 32, 50, 0.94)',
                 border: `1.5px solid ${nearBottom ? 'var(--accent-warn)' : 'var(--accent-select)'}`,
                 color: 'var(--text-primary)',
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: 700,
+                lineHeight: 1.35,
+                wordBreak: 'keep-all',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.45)',
               }}
             >

@@ -1,11 +1,13 @@
-import { getContentBundle } from '../../../content'
-import type { CoreValueCode, GameMode, PinballRunEvent, RunEndReason } from '../../domain/types'
+import { getContentBundle } from '../../../content/index.js'
+import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules.js'
+import type { CoreValueCode, GameMode, PinballRunEvent, RunEndReason } from '../../domain/types.js'
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
-export const PINBALL_WIDTH = 480
-export const PINBALL_HEIGHT = 420
-export const FIXED_DT_MS = 1000 / 120 // 8.333ms fixed physics timestep
+export const PINBALL_WIDTH = 540
+export const PINBALL_HEIGHT = 450
+export const FIXED_DT_MS = 1000 / 120
+const CHUTE_DIVIDER_X = 488
 
 export interface BumperNode {
   letter: CoreValueCode
@@ -24,6 +26,7 @@ export interface FlipperState {
   angleRad: number
   angularVel: number
   pressed: boolean
+  swingBoostMs: number
 }
 
 export interface PinballSnapshot {
@@ -33,6 +36,7 @@ export interface PinballSnapshot {
   ballId: number
   ballsRemaining: number
   ballWaitingLaunch: boolean
+  inLaunchChute: boolean
   ballX: number
   ballY: number
   ballVx: number
@@ -41,12 +45,14 @@ export interface PinballSnapshot {
   bumpers: readonly BumperNode[]
   leftFlipper: FlipperState
   rightFlipper: FlipperState
+  centerPostReady: boolean
   currentSetLetters: CoreValueCode[]
   missingLetters: CoreValueCode[]
   highlightedFinalLetter: CoreValueCode | null
   completedSets: number
   validHits: number
   score: number
+  cleared: boolean
   justCompletedSetFlash: boolean
   finished: boolean
   endReason: RunEndReason | null
@@ -55,17 +61,17 @@ export interface PinballSnapshot {
 const CORE_LETTERS: readonly CoreValueCode[] = ['C', 'O', 'R', 'E']
 
 /**
- * C.O.R.E. 핀볼 고정 시간 간격(120Hz) 물리 시뮬레이션 엔진
- * - 좌·우 방향키로 각 플리퍼 구동(누르면 상승, 놓으면 하강), Space로 발사
- * - 공이 범퍼에서 분리된 뒤 재접촉하고 같은 범퍼 직전 득점과 300ms 이상 차이 시 +100점
- * - 공을 잃어도 현재 세트의 글자는 유지되며, 1글자만 남으면 해당 범퍼와 추천 플리퍼 경로를 점등
- * - 4글자 완성 시 +500점 세트 보너스 후 글자를 비우고 남은 공·시간으로 계속 도전
+ * C.O.R.E. 핀볼 120Hz 물리 시뮬레이션 엔진 (개선본)
+ * - 우측 전용 발사 슈트(x=488..524) + 상단 곡선 디플렉터를 통해 발사 즉시 상단 범퍼 구역으로 시원하게 진입
+ * - 플리퍼 타격 시 스윙 부스트(260ms) 및 홀드 반발력을 모두 적용해 공이 확실히 상단 범퍼까지 솟구침
+ * - 중앙 세이브 포스트(쿨타임 2초)로 억울한 중앙 직하강 유실 완화
+ * - 배점: 유효 범퍼 명중 +2점, C·O·R·E 1세트 완성 보너스 +4점 (10점 이상 통과 후 고득점 경쟁)
  */
 export class PinballSimulation {
   readonly mode: GameMode
   readonly isPractice: boolean
   readonly maxDurationMs: number
-  readonly ballRadius = 9
+  readonly ballRadius = 9.5
   readonly bumpers: readonly BumperNode[]
 
   private activeDurationMs = 0
@@ -73,13 +79,16 @@ export class PinballSimulation {
   private ballId = 1
   private ballsLost = 0
   private ballWaitingLaunch = true
-  private ballX = PINBALL_WIDTH - 28
-  private ballY = PINBALL_HEIGHT - 54
+  private inLaunchChute = true
+  private autoLaunchDelayMs = 350
+  private ballX = 506
+  private ballY = PINBALL_HEIGHT - 46
   private ballVx = 0
   private ballVy = 0
 
   private leftFlipper: FlipperState
   private rightFlipper: FlipperState
+  private centerPostCooldownMs = 0
 
   private readonly touchingBumpers = new Set<CoreValueCode>()
   private readonly separatedSinceHit: Record<CoreValueCode, boolean> = {
@@ -103,6 +112,7 @@ export class PinballSimulation {
     mode: GameMode
     contentVersion: string
     isPractice?: boolean
+    disableAutoLaunch?: boolean
   }) {
     this.mode = params.mode
     this.isPractice = Boolean(params.isPractice)
@@ -111,6 +121,9 @@ export class PinballSimulation {
       : params.mode === 'assisted'
         ? 125_000
         : 100_000
+    if (params.disableAutoLaunch) {
+      this.autoLaunchDelayMs = -1
+    }
 
     const bundle = getContentBundle(params.contentVersion)
     const shortName = (code: CoreValueCode) => {
@@ -119,35 +132,36 @@ export class PinballSimulation {
       return rec.display_ko.split('(')[0]!.trim()
     }
 
-    // Placed along deliberate flipper shot lanes (Left flipper -> R/E cross-court & O; Right flipper -> C/O cross-court & R)
+    // Positioned inside main playfield [20 .. 488]
     this.bumpers = [
-      { letter: 'C', labelKo: shortName('C'), x: 118, y: 132, radius: 26, preferredFlipper: 'right' },
-      { letter: 'O', labelKo: shortName('O'), x: 196, y: 88, radius: 26, preferredFlipper: 'left' },
-      { letter: 'R', labelKo: shortName('R'), x: 284, y: 88, radius: 26, preferredFlipper: 'right' },
-      { letter: 'E', labelKo: shortName('E'), x: 362, y: 132, radius: 26, preferredFlipper: 'left' },
+      { letter: 'C', labelKo: shortName('C'), x: 118, y: 142, radius: 28, preferredFlipper: 'right' },
+      { letter: 'O', labelKo: shortName('O'), x: 204, y: 94, radius: 28, preferredFlipper: 'left' },
+      { letter: 'R', labelKo: shortName('R'), x: 304, y: 94, radius: 28, preferredFlipper: 'right' },
+      { letter: 'E', labelKo: shortName('E'), x: 390, y: 142, radius: 28, preferredFlipper: 'left' },
     ]
 
-    // Assisted mode increases flipper effective length to 115%!
-    const baseLen = 84
+    const baseLen = 102
     const flipperLen = params.mode === 'assisted' ? Math.round(baseLen * 1.15) : baseLen
 
     this.leftFlipper = {
       side: 'left',
-      pivotX: 132,
-      pivotY: 366,
+      pivotX: 128,
+      pivotY: 392,
       length: flipperLen,
-      angleRad: 0.42, // downward rest
+      angleRad: 0.38,
       angularVel: 0,
       pressed: false,
+      swingBoostMs: 0,
     }
     this.rightFlipper = {
       side: 'right',
-      pivotX: 348,
-      pivotY: 366,
+      pivotX: 380,
+      pivotY: 392,
       length: flipperLen,
-      angleRad: Math.PI - 0.42,
+      angleRad: Math.PI - 0.38,
       angularVel: 0,
       pressed: false,
+      swingBoostMs: 0,
     }
   }
 
@@ -162,47 +176,47 @@ export class PinballSimulation {
   }
 
   setFlipperPressed(side: 'left' | 'right', pressed: boolean): void {
-    if (side === 'left') {
-      this.leftFlipper.pressed = pressed
-    } else {
-      this.rightFlipper.pressed = pressed
+    const f = side === 'left' ? this.leftFlipper : this.rightFlipper
+    if (pressed && !f.pressed) {
+      f.swingBoostMs = 260
     }
+    f.pressed = pressed
   }
 
   launchBall(): boolean {
     if (this.finished || !this.ballWaitingLaunch) return false
     this.ballWaitingLaunch = false
-    this.ballX = PINBALL_WIDTH - 28
-    this.ballY = PINBALL_HEIGHT - 64
-    // Launches up and arcs cleanly into the upper bumper field
-    this.ballVx = -165
-    this.ballVy = -450
+    this.inLaunchChute = true
+    this.ballX = 506
+    this.ballY = PINBALL_HEIGHT - 52
+    // Strong upward launch straight up the dedicated right chute!
+    this.ballVx = -8
+    this.ballVy = -650
     return true
   }
 
-  /**
-   * 테스트 및 의도적 조준 검증용: 지정 범퍼 방향으로 플리퍼 샷 궤적을 발사한다.
-   */
   aimBallTowardBumper(targetLetter: CoreValueCode): void {
     const target = this.bumpers.find((b) => b.letter === targetLetter)!
     this.ballWaitingLaunch = false
+    this.inLaunchChute = false
     const fromLeft = target.preferredFlipper === 'left'
-    this.ballX = fromLeft ? 175 : 305
-    this.ballY = 340
+    this.ballX = fromLeft ? 178 : 330
+    this.ballY = 360
     const dx = target.x - this.ballX
     const dy = target.y - this.ballY
     const flightSec = 0.42
-    // Ballistic velocity compensating gravity (360 px/s^2) so the shot lands dead-center on target
     this.ballVx = dx / flightSec
-    this.ballVy = (dy - 0.5 * 360 * flightSec * flightSec) / flightSec
+    this.ballVy = (dy - 0.5 * 330 * flightSec * flightSec) / flightSec
   }
 
   dropBallBetweenFlippers(): void {
     this.ballWaitingLaunch = false
-    this.ballX = PINBALL_WIDTH / 2
-    this.ballY = 388
+    this.inLaunchChute = false
+    this.centerPostCooldownMs = 5_000 // disable center save post for deterministic drain test
+    this.ballX = 254
+    this.ballY = 418
     this.ballVx = 0
-    this.ballVy = 260
+    this.ballVy = 280
   }
 
   step(dtMs: number): PinballSnapshot {
@@ -227,6 +241,9 @@ export class PinballSimulation {
     if (this.setFlashRemainingMs > 0) {
       this.setFlashRemainingMs = Math.max(0, this.setFlashRemainingMs - dtMs)
     }
+    if (this.centerPostCooldownMs > 0) {
+      this.centerPostCooldownMs = Math.max(0, this.centerPostCooldownMs - dtMs)
+    }
 
     if (this.activeDurationMs >= this.maxDurationMs) {
       this.finished = true
@@ -234,13 +251,16 @@ export class PinballSimulation {
       return
     }
 
-    // Update flipper angles (press -> up, release -> down)
+    // Update flipper angles & swing boost timers
     const updateFlipper = (f: FlipperState) => {
-      const restAngle = f.side === 'left' ? 0.42 : Math.PI - 0.42
-      const upAngle = f.side === 'left' ? -0.46 : Math.PI + 0.46
+      if (f.swingBoostMs > 0) {
+        f.swingBoostMs = Math.max(0, f.swingBoostMs - dtMs)
+      }
+      const restAngle = f.side === 'left' ? 0.38 : Math.PI - 0.38
+      const upAngle = f.side === 'left' ? -0.48 : Math.PI + 0.48
       const target = f.pressed ? upAngle : restAngle
       const prev = f.angleRad
-      const rate = 15 * dtSec
+      const rate = 18 * dtSec
       if (Math.abs(target - prev) <= rate) {
         f.angleRad = target
       } else {
@@ -251,42 +271,87 @@ export class PinballSimulation {
     updateFlipper(this.leftFlipper)
     updateFlipper(this.rightFlipper)
 
+    // Auto-launch ball 1 shortly after round starts so players see the ball fly up immediately!
     if (this.ballWaitingLaunch) {
+      if (this.autoLaunchDelayMs >= 0) {
+        this.autoLaunchDelayMs -= dtMs
+        if (this.autoLaunchDelayMs <= 0) {
+          this.launchBall()
+        }
+      }
       return
     }
 
-    // Gravity + integrate ball
-    const gravity = 360
+    // Slightly lighter arcade gravity (330 px/s^2) for floaty, satisfying bumper combos
+    const gravity = 330
     this.ballVy += gravity * dtSec
     this.ballX += this.ballVx * dtSec
     this.ballY += this.ballVy * dtSec
 
-    // Playfield walls & angled slingshot rails
     const leftWall = 20
-    const rightWall = PINBALL_WIDTH - 20
+    const outerRightWall = PINBALL_WIDTH - 16
     const topWall = 20
 
+    if (this.inLaunchChute) {
+      // Inside right launch chute [488 .. 524]: guide straight up and deflect left at top!
+      if (this.ballX + this.ballRadius > outerRightWall) {
+        this.ballX = outerRightWall - this.ballRadius
+        this.ballVx = -Math.abs(this.ballVx) * 0.8
+      }
+      if (this.ballY > 105 && this.ballX - this.ballRadius < CHUTE_DIVIDER_X) {
+        this.ballX = CHUTE_DIVIDER_X + this.ballRadius
+        this.ballVx = Math.abs(this.ballVx) * 0.5
+      }
+      // Angled top deflector roof sends ball cleanly into upper bumper field!
+      if (this.ballY - this.ballRadius <= 44) {
+        this.ballY = 44 + this.ballRadius
+        this.ballVx = -310 - (this.ballId % 3) * 25
+        this.ballVy = 55
+      }
+      if (this.ballX < CHUTE_DIVIDER_X - this.ballRadius - 2) {
+        this.inLaunchChute = false
+      }
+      return
+    }
+
+    // Main Playfield Walls [20 .. 488] (one-way gate keeps ball out of launch chute!)
     if (this.ballX - this.ballRadius < leftWall) {
       this.ballX = leftWall + this.ballRadius
-      this.ballVx = Math.abs(this.ballVx) * 0.88
-    } else if (this.ballX + this.ballRadius > rightWall) {
-      this.ballX = rightWall - this.ballRadius
-      this.ballVx = -Math.abs(this.ballVx) * 0.88
+      this.ballVx = Math.abs(this.ballVx) * 0.9 + 25
+    } else if (this.ballX + this.ballRadius > CHUTE_DIVIDER_X) {
+      this.ballX = CHUTE_DIVIDER_X - this.ballRadius
+      this.ballVx = -Math.abs(this.ballVx) * 0.9 - 25
     }
     if (this.ballY - this.ballRadius < topWall) {
       this.ballY = topWall + this.ballRadius
-      this.ballVy = Math.abs(this.ballVy) * 0.88
+      this.ballVy = Math.abs(this.ballVy) * 0.9 + 20
     }
 
-    // Angled side inlanes guiding ball onto left & right flippers
-    this.collideSegment(20, 275, 132, 366, 0.75, 0)
-    this.collideSegment(PINBALL_WIDTH - 20, 275, 348, 366, 0.75, 0)
+    // Side Slingshot Inlanes feeding cleanly onto Left (128,392) & Right (380,392) Flippers
+    this.collideSegment(20, 286, 128, 392, 0.82, 0)
+    this.collideSegment(CHUTE_DIVIDER_X, 286, 380, 392, 0.82, 0)
 
-    // Flipper segment collisions (impulse boosted when flipper is actively swinging up!)
+    // Center Save Post at (254, 412) bounces dead-center drops back into play!
+    if (this.centerPostCooldownMs <= 0) {
+      const pdx = this.ballX - 254
+      const pdy = this.ballY - 412
+      const pdist = Math.hypot(pdx, pdy)
+      const pMin = this.ballRadius + 10
+      if (pdist <= pMin) {
+        const nx = pdist > 0.001 ? pdx / pdist : 0.15
+        this.ballX = 254 + nx * (pMin + 1)
+        this.ballY = 412 - (pMin + 1)
+        this.ballVx = nx * 160 + (this.ballVx >= 0 ? 65 : -65)
+        this.ballVy = -430
+        this.centerPostCooldownMs = 2_200
+      }
+    }
+
+    // Flipper Collisions (strong upward rebound both during swing AND while held!)
     this.collideFlipper(this.leftFlipper)
     this.collideFlipper(this.rightFlipper)
 
-    // 4 C.O.R.E. Bumper collisions with separation + 300ms cooldown rule
+    // 4 C.O.R.E. Bumpers
     for (const bumper of this.bumpers) {
       const dx = this.ballX - bumper.x
       const dy = this.ballY - bumper.y
@@ -296,11 +361,10 @@ export class PinballSimulation {
       if (dist <= minDist) {
         const nx = dist > 0.001 ? dx / dist : 0
         const ny = dist > 0.001 ? dy / dist : -1
-        this.ballX = bumper.x + nx * (minDist + 1)
-        this.ballY = bumper.y + ny * (minDist + 1)
+        this.ballX = bumper.x + nx * (minDist + 1.5)
+        this.ballY = bumper.y + ny * (minDist + 1.5)
 
-        // Lively arcade bumper kick
-        const bounceSpeed = Math.max(290, Math.hypot(this.ballVx, this.ballVy) * 0.96)
+        const bounceSpeed = Math.max(330, Math.hypot(this.ballVx, this.ballVy) * 0.98)
         this.ballVx = nx * bounceSpeed
         this.ballVy = ny * bounceSpeed
 
@@ -327,7 +391,7 @@ export class PinballSimulation {
             if (this.currentSet.size === 4) {
               this.completedSets += 1
               this.currentSet.clear()
-              this.setFlashRemainingMs = 1_400
+              this.setFlashRemainingMs = 1_500
             }
           }
         }
@@ -339,19 +403,20 @@ export class PinballSimulation {
       }
     }
 
-    // Clamp max ball speed for stability
     const speed = Math.hypot(this.ballVx, this.ballVy)
-    if (speed > 660) {
-      this.ballVx = (this.ballVx / speed) * 660
-      this.ballVy = (this.ballVy / speed) * 660
+    if (speed > 700) {
+      this.ballVx = (this.ballVx / speed) * 700
+      this.ballVy = (this.ballVy / speed) * 700
     }
 
-    // Ball drain below flippers
-    if (this.ballY - this.ballRadius > PINBALL_HEIGHT + 8) {
+    // Drain check below flippers
+    if (this.ballY - this.ballRadius > PINBALL_HEIGHT + 10) {
       if (this.isPractice) {
         this.ballWaitingLaunch = true
-        this.ballX = PINBALL_WIDTH - 28
-        this.ballY = PINBALL_HEIGHT - 54
+        this.inLaunchChute = true
+        this.autoLaunchDelayMs = 300
+        this.ballX = 506
+        this.ballY = PINBALL_HEIGHT - 46
         this.ballVx = 0
         this.ballVy = 0
         return
@@ -363,15 +428,16 @@ export class PinballSimulation {
       })
       this.ballsLost += 1
       if (this.ballsLost >= 3) {
-        // Note: currentSet letters remain preserved on snapshot!
         this.finished = true
         this.endReason = 'balls_exhausted'
         return
       }
       this.ballId += 1
       this.ballWaitingLaunch = true
-      this.ballX = PINBALL_WIDTH - 28
-      this.ballY = PINBALL_HEIGHT - 54
+      this.inLaunchChute = true
+      this.autoLaunchDelayMs = -1 // let user press Space or click Launch for next ball
+      this.ballX = 506
+      this.ballY = PINBALL_HEIGHT - 46
       this.ballVx = 0
       this.ballVy = 0
     }
@@ -380,17 +446,9 @@ export class PinballSimulation {
   private collideFlipper(f: FlipperState): void {
     const tipX = f.pivotX + Math.cos(f.angleRad) * f.length
     const tipY = f.pivotY + Math.sin(f.angleRad) * f.length
-    const swingingUp =
-      (f.side === 'left' && f.angularVel < -0.5) ||
-      (f.side === 'right' && f.angularVel > 0.5)
-    this.collideSegment(
-      f.pivotX,
-      f.pivotY,
-      tipX,
-      tipY,
-      0.86,
-      swingingUp ? 390 : 40,
-    )
+    const isSwinging = f.swingBoostMs > 0 || Math.abs(f.angularVel) > 0.4
+    const kickSpeed = isSwinging ? 560 : f.pressed ? 480 : 350
+    this.collideSegment(f.pivotX, f.pivotY, tipX, tipY, 0.9, kickSpeed, f.side)
   }
 
   private collideSegment(
@@ -400,6 +458,7 @@ export class PinballSimulation {
     y2: number,
     restitution: number,
     upwardKick: number,
+    flipperSide?: 'left' | 'right',
   ): void {
     const segDx = x2 - x1
     const segDy = y2 - y1
@@ -415,25 +474,34 @@ export class PinballSimulation {
     const dx = this.ballX - closestX
     const dy = this.ballY - closestY
     const dist = Math.hypot(dx, dy)
-    const thickness = 5
+    const thickness = flipperSide ? 7 : 5
     const minDist = this.ballRadius + thickness
 
     if (dist < minDist) {
-      const nx = dist > 0.001 ? dx / dist : 0
-      const ny = dist > 0.001 ? dy / dist : -1
-      this.ballX = closestX + nx * (minDist + 0.5)
-      this.ballY = closestY + ny * (minDist + 0.5)
+      let nx = dist > 0.001 ? dx / dist : 0
+      let ny = dist > 0.001 ? dy / dist : -1
+      // For flippers, always push ball onto the TOP side of the flipper so it never clips downward!
+      if (flipperSide && ny > -0.15) {
+        ny = -0.85
+        nx = flipperSide === 'left' ? 0.35 : -0.35
+      }
+      this.ballX = closestX + nx * (minDist + 1)
+      this.ballY = closestY + ny * (minDist + 1)
+
+      if (upwardKick > 0 && flipperSide) {
+        // Aim trajectory across upper bumper field based on contact t [0=pivot .. 1=tip]
+        const dirSign = flipperSide === 'left' ? 1 : -1
+        const spread = (t - 0.45) * 0.78 * dirSign
+        const aimAngle = -Math.PI / 2 + spread
+        this.ballVx = Math.cos(aimAngle) * upwardKick
+        this.ballVy = Math.min(-360, Math.sin(aimAngle) * upwardKick)
+        return
+      }
 
       const dot = this.ballVx * nx + this.ballVy * ny
       if (dot < 0) {
         this.ballVx -= (1 + restitution) * dot * nx
         this.ballVy -= (1 + restitution) * dot * ny
-      }
-      if (upwardKick > 0) {
-        // Angle shot based on contact position t along flipper [0=pivot .. 1=tip]
-        const aimAngle = -Math.PI / 2 + (t - 0.5) * 0.72 * (x2 > x1 ? 1 : -1)
-        this.ballVx = Math.cos(aimAngle) * upwardKick
-        this.ballVy = Math.sin(aimAngle) * upwardKick
       }
     }
   }
@@ -450,6 +518,7 @@ export class PinballSimulation {
       : missingLetters.length === 1
         ? missingLetters[0]!
         : null
+    const score = this.validHits * BASE_ACTION_POINTS + this.completedSets * 4
 
     return {
       isPractice: this.isPractice,
@@ -458,6 +527,7 @@ export class PinballSimulation {
       ballId: this.ballId,
       ballsRemaining: Math.max(0, 3 - this.ballsLost),
       ballWaitingLaunch: this.ballWaitingLaunch,
+      inLaunchChute: this.inLaunchChute,
       ballX: this.ballX,
       ballY: this.ballY,
       ballVx: this.ballVx,
@@ -466,12 +536,14 @@ export class PinballSimulation {
       bumpers: this.bumpers,
       leftFlipper: { ...this.leftFlipper },
       rightFlipper: { ...this.rightFlipper },
+      centerPostReady: this.centerPostCooldownMs <= 0,
       currentSetLetters,
       missingLetters,
       highlightedFinalLetter,
       completedSets: this.completedSets,
       validHits: this.validHits,
-      score: this.validHits * 100 + this.completedSets * 500,
+      score,
+      cleared: score >= PASSING_SCORE,
       justCompletedSetFlash: this.setFlashRemainingMs > 0,
       finished: this.finished,
       endReason: this.endReason,

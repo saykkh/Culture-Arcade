@@ -18,7 +18,7 @@ export function ArcadeHeader({
   onNavigate,
   onLogout,
 }: ArcadeHeaderProps) {
-  const { prefs, toggleMuted, toggleReduceMotion } = useArcadePreferences()
+  const { prefs, toggleMuted, toggleBgmMuted, toggleReduceMotion } = useArcadePreferences()
   const allFiveLit = Boolean(me && me.requiredClearedCount === 5)
 
   return (
@@ -93,11 +93,20 @@ export function ArcadeHeader({
         <button
           type="button"
           className="btn-arcade btn-compact"
+          onClick={toggleBgmMuted}
+          aria-pressed={!prefs.bgmMuted && !prefs.muted}
+          title="배경음악(BGM) 켜기/끄기"
+        >
+          {prefs.bgmMuted || prefs.muted ? '🎵 BGM 꺼짐' : '🎵 BGM 켜짐'}
+        </button>
+        <button
+          type="button"
+          className="btn-arcade btn-compact"
           onClick={toggleMuted}
           aria-pressed={prefs.muted}
-          title="효과음 켜기/끄기"
+          title="전체 소리(배경음+효과음) 켜기/끄기"
         >
-          {prefs.muted ? '🔇 음소거 켜짐' : '🔊 효과음 켜짐'}
+          {prefs.muted ? '🔇 전체 음소거' : '🔊 효과음 켜짐'}
         </button>
         <button
           type="button"

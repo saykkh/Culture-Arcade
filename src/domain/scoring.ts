@@ -5,7 +5,12 @@ import {
   buildTypingSchedule,
   getContentBundle,
 } from '../../content/index.js'
-import { GAME_CATALOG, normalizePhraseInput } from './rules.js'
+import {
+  BASE_ACTION_POINTS,
+  GAME_CATALOG,
+  normalizePhraseInput,
+  PASSING_SCORE,
+} from './rules.js'
 import type {
   ControlRoomRunEvent,
   CoreValueCode,
@@ -179,8 +184,8 @@ export function verifyAndScoreRun(params: {
         }
       }
 
-      const score = correctCount * 100
-      const cleared = correctCount >= 10
+      const score = correctCount * BASE_ACTION_POINTS
+      const cleared = score >= PASSING_SCORE
       return {
         score,
         cleared,
@@ -202,6 +207,8 @@ export function verifyAndScoreRun(params: {
       const completedSentenceIds: string[] = []
       const stepProgress = new Map<string, number>()
       const confusedPairs: Array<{ chosenText: string; expectedText: string }> = []
+      let correctChunks = 0
+      let completedSentences = 0
       let wrongChunkCount = 0
       let collisions = 0
       let lives = 3
@@ -217,19 +224,23 @@ export function verifyAndScoreRun(params: {
           if (!sentence) {
             throw new RunVerificationError('INVALID_SENTENCE', `Unknown sentence ${ev.sentenceId}`)
           }
-          if (completedSentenceIds.includes(sentence.id)) {
-            continue
-          }
           const expectedStep = stepProgress.get(sentence.id) ?? 0
           if (ev.stepIndex !== expectedStep) {
             throw new RunVerificationError('INVALID_STEP', 'Snake chunk step out of order.')
           }
           const expectedChunk = sentence.chunks[expectedStep]!
           if (normalizePhraseInput(ev.chunkText) === normalizePhraseInput(expectedChunk)) {
+            correctChunks += 1
             const nextStep = expectedStep + 1
-            stepProgress.set(sentence.id, nextStep)
             if (nextStep >= sentence.chunks.length) {
-              completedSentenceIds.push(sentence.id)
+              completedSentences += 1
+              if (!completedSentenceIds.includes(sentence.id)) {
+                completedSentenceIds.push(sentence.id)
+              }
+              // Reset step progress to 0 so endless bonus waves can cycle sentences cleanly!
+              stepProgress.set(sentence.id, 0)
+            } else {
+              stepProgress.set(sentence.id, nextStep)
             }
           } else {
             wrongChunkCount += 1
@@ -245,15 +256,16 @@ export function verifyAndScoreRun(params: {
         }
       }
 
-      const completedSentences = completedSentenceIds.length
-      const score = completedSentences * 300
-      const cleared = completedSentences >= 3
+      const score =
+        correctChunks * BASE_ACTION_POINTS + completedSentences * BASE_ACTION_POINTS
+      const cleared = score >= PASSING_SCORE
       return {
         score,
         cleared,
         activeDurationMs: Math.round(activeDurationMs),
         actionSummary: {
           kind: 'snake',
+          correctChunks,
           completedSentences,
           completedSentenceIds,
           wrongChunkCount,
@@ -343,8 +355,8 @@ export function verifyAndScoreRun(params: {
         }
       }
 
-      const score = correctCount * 100
-      const cleared = correctCount >= 8
+      const score = correctCount * BASE_ACTION_POINTS
+      const cleared = score >= PASSING_SCORE
       return {
         score,
         cleared,
@@ -363,10 +375,10 @@ export function verifyAndScoreRun(params: {
     case 'racing': {
       const plan = buildRacingPlan(bundle, seed)
       const allowedVehicles = new Set(
-        Array.from({ length: 15 }, (_, idx) => `veh-${idx + 1}`),
+        Array.from({ length: 20 }, (_, idx) => `veh-${idx + 1}`),
       )
       const allowedObstacles = new Set(
-        Array.from({ length: 10 }, (_, idx) => `obs-${idx + 1}`),
+        Array.from({ length: 12 }, (_, idx) => `obs-${idx + 1}`),
       )
       const overtakenVehicles = new Set<string>()
       const collidedEntities = new Set<string>()
@@ -415,10 +427,10 @@ export function verifyAndScoreRun(params: {
 
       const overtakeCount = overtakenVehicles.size
       const collisionCount = collidedEntities.size
-      // Gate score is strictly 0 regardless of choice!
-      const rawScore = overtakeCount * 100 - collisionCount * 50
+      // Gate score is strictly 0 regardless of choice! Overtake +2, Collision -1, Pass >= 10
+      const rawScore = overtakeCount * BASE_ACTION_POINTS - collisionCount * 1
       const score = Math.max(0, rawScore)
-      const cleared = score >= 1_000
+      const cleared = score >= PASSING_SCORE
       const gateCorrect = gateChoice === plan.correctGateSide
       const renderMode = params.renderMode === 'simplified' ? 'simplified' : '3d'
 
@@ -481,8 +493,8 @@ export function verifyAndScoreRun(params: {
         }
       }
 
-      const score = validHits * 100 + completedSets * 500
-      const cleared = completedSets >= 1
+      const score = validHits * BASE_ACTION_POINTS + completedSets * 4
+      const cleared = score >= PASSING_SCORE
       return {
         score,
         cleared,
@@ -550,7 +562,7 @@ export function verifyAndScoreRun(params: {
       const cleared = currentStage === 4 && exitActivated
       const interactionMode = params.renderMode === 'panel-list' ? 'panel-list' : '3d'
       return {
-        score: currentStage * 250,
+        score: currentStage * BASE_ACTION_POINTS + (exitActivated ? BASE_ACTION_POINTS : 0),
         cleared,
         activeDurationMs: Math.round(activeDurationMs),
         actionSummary: {

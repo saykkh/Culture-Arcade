@@ -98,7 +98,7 @@ describe('Stage 1 · 공통 규칙과 데이터 검증', () => {
     expect(run.attemptKind).toBe('first_attempt')
 
     const schedule = buildTypingSchedule(SAMPLE_CONTENT_V04, run.seed, run.mode)
-    const events = schedule.slice(0, 10).map((slot, idx) => ({
+    const events = schedule.slice(0, 6).map((slot, idx) => ({
       seq: idx + 1,
       t_ms: (idx + 1) * 2_000,
       type: 'submit_phrase' as const,
@@ -112,7 +112,7 @@ describe('Stage 1 · 공통 규칙과 데이터 검증', () => {
       endReason: 'completed_all',
     })
     expect(firstSubmit.cleared).toBe(true)
-    expect(firstSubmit.score).toBe(1000)
+    expect(firstSubmit.score).toBe(12)
     expect(firstSubmit.newlyLitSocket).toBe(true)
     expect(firstSubmit.requiredClearedCount).toBe(1)
 
@@ -135,7 +135,7 @@ describe('Stage 1 · 공통 규칙과 데이터 검증', () => {
     expect(mePc2.litSockets.typing).toBe(true)
     const typingProgress = mePc2.games.find((g) => g.gameId === 'typing')
     expect(typingProgress?.finalizedAttemptCount).toBe(1)
-    expect(typingProgress?.assistedBestScore).toBe(1000)
+    expect(typingProgress?.assistedBestScore).toBe(12)
 
     // Code reissue immediately invalidates old sessions while preserving nickname & progress
     const reissued = store.reissueParticipantCodeByAdmin(loginPc1.participantId)

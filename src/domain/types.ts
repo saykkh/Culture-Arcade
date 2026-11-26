@@ -38,6 +38,7 @@ export interface TypingActionSummary {
 
 export interface SnakeActionSummary {
   kind: 'snake'
+  correctChunks: number
   completedSentences: number
   completedSentenceIds: string[]
   wrongChunkCount: number

@@ -77,16 +77,17 @@ export interface ScheduledTypingSlot {
 }
 
 /**
- * 16개 슬롯을 시드 기반으로 편성하되, 긴 문구('long') 두 개의 낙하 마감(deadlineMs)이
- * 정규·지원 모드 어느 쪽에서도 3,000ms 이내로 겹치지 않도록 편성한다.
+ * 24개 슬롯을 시드 기반으로 편성하되(5개=10점 통과 후 최대 48점까지 경쟁 가능),
+ * 긴 문구('long') 두 개의 낙하 마감(deadlineMs)이 정규·지원 모드 어느 쪽에서도 3,000ms 이내로 겹치지 않도록 편성한다.
  */
 export function buildTypingSchedule(
   bundle: LearningContentBundle,
   seed: number,
   mode: GameMode,
 ): ScheduledTypingSlot[] {
+  const totalSlots = 24
   const roundDurationMs = mode === 'assisted' ? 75_000 : 60_000
-  const baseFallMs = mode === 'assisted' ? 14_500 : 11_600
+  const baseFallMs = mode === 'assisted' ? 14_200 : 11_400
   const longItems = seededShuffle(
     bundle.typingItems.filter((item) => item.lengthClass === 'long'),
     seed ^ 0x13579bdf,
@@ -96,24 +97,26 @@ export function buildTypingSchedule(
     seed ^ 0x2468ace0,
   )
 
-  // Space long items widely across the 16 slots (e.g. indices 3, 8, 13) so deadlines are >= 9s apart
-  const ordered = Array.from({ length: 16 }, () => null as (typeof bundle.typingItems)[number] | null)
-  const longIndices = [3, 8, 13, 15]
+  const ordered = Array.from(
+    { length: totalSlots },
+    () => null as (typeof bundle.typingItems)[number] | null,
+  )
+  const longIndices = [3, 9, 15, 21]
   longItems.forEach((item, idx) => {
-    const slotIdx = longIndices[idx] ?? Math.min(15, idx * 4 + 2)
+    const slotIdx = longIndices[idx] ?? Math.min(totalSlots - 1, idx * 6 + 3)
     ordered[slotIdx] = item
   })
 
   let otherCursor = 0
-  for (let i = 0; i < 16; i += 1) {
+  for (let i = 0; i < totalSlots; i += 1) {
     if (!ordered[i]) {
       ordered[i] = otherItems[otherCursor % otherItems.length]!
       otherCursor += 1
     }
   }
 
-  const maxSpawnWindowMs = roundDurationMs - baseFallMs - 2_200
-  const stepMs = Math.floor(maxSpawnWindowMs / 15)
+  const maxSpawnWindowMs = roundDurationMs - baseFallMs - 2_000
+  const stepMs = Math.floor(maxSpawnWindowMs / (totalSlots - 1))
 
   return ordered.map((item, slotId) => {
     const resolved = item!

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildShooterRound, getContentBundle } from '../../../content'
+import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, RunEndReason, ShooterRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
 import { playArcadeSfx } from '../../lib/sound'
@@ -468,18 +469,21 @@ export function ShooterGame({
   }, [currentScheduled, laserBeam, phase, prefs.reduceMotion, shipX])
 
   const aimRemainingSec = Math.max(0, (aimLimitMs - aimElapsedMs) / 1000).toFixed(1)
-  const score = correctCount * 100
+  const score = correctCount * BASE_ACTION_POINTS
+  const cleared = score >= PASSING_SCORE
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 8 }}>
       {/* HUD */}
       <div className="play-hud-bar">
         <div className="hud-metric">
-          <span style={{ color: 'var(--text-muted)' }}>현재 행동</span>
-          <strong style={{ color: correctCount >= 8 ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
+          <span style={{ color: 'var(--text-muted)' }}>통과 목표 ({PASSING_SCORE}점)</span>
+          <strong style={{ color: cleared ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
             {isPractice
               ? `연습 명중 ${practiceCleared ? 1 : 0}/1`
-              : `정답 명중 ${correctCount}/8`}
+              : cleared
+                ? `✓ 통과 달성! · 정답 ${correctCount}개 (24점 만점 도전 중)`
+                : `정답 명중 ${correctCount}/5 (${score}/${PASSING_SCORE}점)`}
           </strong>
           {!isPractice && (
             <span className="mono-num" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
@@ -514,8 +518,8 @@ export function ShooterGame({
           {!isPractice && (
             <>
               <span style={{ color: 'var(--text-muted)' }}>점수</span>
-              <span className="mono-num" style={{ fontSize: 20, color: 'var(--accent-clear)' }}>
-                {score}
+              <span className="mono-num" style={{ fontSize: 22, color: 'var(--accent-clear)' }}>
+                {score}점
               </span>
             </>
           )}
@@ -607,10 +611,37 @@ export function ShooterGame({
       >
         <canvas
           ref={canvasRef}
-          width={900}
-          height={235}
-          style={{ width: '100%', height: '100%', flex: 1, display: 'block' }}
-          aria-label="가치 표적 슈팅 조준 화면"
+          width={920}
+          height={275}
+          onMouseMove={(e) => {
+            if (phase === 'feedback' || tabPaused || practiceCleared) return
+            const rect = e.currentTarget.getBoundingClientRect()
+            const normX = Math.min(0.95, Math.max(0.05, (e.clientX - rect.left) / rect.width))
+            shipXRef.current = normX
+            setShipX(normX)
+          }}
+          onClick={(e) => {
+            if (tabPaused || practiceCleared) return
+            if (phase === 'reading') {
+              beginAiming(false)
+              return
+            }
+            if (phase === 'aiming') {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const normX = Math.min(0.95, Math.max(0.05, (e.clientX - rect.left) / rect.width))
+              shipXRef.current = normX
+              setShipX(normX)
+              fireLaserAtX(normX)
+            }
+          }}
+          style={{
+            width: '100%',
+            height: '100%',
+            flex: 1,
+            display: 'block',
+            cursor: phase === 'aiming' ? 'crosshair' : 'pointer',
+          }}
+          aria-label="가치 표적 슈팅 조준 화면 (마우스 이동 및 클릭 발사 지원)"
         />
 
         {/* Feedback Overlay: Correct / Wrong (shows both chosen & correct descriptions!) / Timeout */}
@@ -632,7 +663,9 @@ export function ShooterGame({
             <div className="cabinet-modal-card" style={{ maxWidth: 640, padding: '16px 20px' }}>
               <div style={{ marginBottom: 8 }}>
                 {feedbackData.outcome === 'correct' ? (
-                  <span className="cabinet-status-tag cleared">✓ 정답 명중 (+100점)</span>
+                  <span className="cabinet-status-tag cleared">
+                    ✓ 정답 명중 (+{BASE_ACTION_POINTS}점)
+                  </span>
                 ) : feedbackData.outcome === 'timeout' ? (
                   <span className="sample-pill">⏳ 조준 시간 초과 (0점)</span>
                 ) : (

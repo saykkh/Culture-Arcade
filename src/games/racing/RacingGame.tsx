@@ -292,15 +292,17 @@ export function RacingGame({
       {/* HUD */}
       <div className="play-hud-bar">
         <div className="hud-metric">
-          <span style={{ color: 'var(--text-muted)' }}>현재 행동</span>
+          <span style={{ color: 'var(--text-muted)' }}>통과 목표 (10점)</span>
           <strong
             style={{
-              color: snapshot.netScore >= 1000 ? 'var(--accent-clear)' : 'var(--accent-select)',
+              color: snapshot.netScore >= 10 ? 'var(--accent-clear)' : 'var(--accent-select)',
             }}
           >
             {isPractice
               ? `첫 차량 추월 ${practiceCleared ? 1 : 0}/1`
-              : `추월 ${snapshot.overtakeCount}/15대 · 충돌 ${snapshot.collisionCount}회`}
+              : snapshot.netScore >= 10
+                ? `✓ 통과 달성! · 추월 ${snapshot.overtakeCount}/20대 (최고 40점 경쟁 중)`
+                : `추월 ${snapshot.overtakeCount}대 · 충돌 ${snapshot.collisionCount}회 (${snapshot.netScore}/10점)`}
           </strong>
         </div>
 

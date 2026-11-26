@@ -396,7 +396,7 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
 
     const board = store.getLeaderboard(tokens[0]!, 'typing')
     expect(board.top10[0]!.nickname).toBe('참가자_1')
-    expect(board.top10[0]!.score).toBe(1000)
+    expect(board.top10[0]!.score).toBe(20)
     expect(board.top10[1]!.nickname).toBe('참가자_2')
 
     // Shooter item analytics threshold test on targetItem 'sht-c-1':

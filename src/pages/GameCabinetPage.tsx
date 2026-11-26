@@ -55,13 +55,13 @@ function formatResultFeedback(
       const prevCount = prev?.kind === 'typing' ? prev.correctCount : null
       const diff = prevCount !== null ? curr.correctCount - prevCount : null
       const achievedHeadline = result.cleared
-        ? `정확한 공식 문구 ${curr.correctCount}개 연결 완료 · 케이블 점등 성공!`
-        : `문구 ${curr.correctCount}개 연결 · ${Math.max(1, 10 - curr.correctCount)}개 더 연결하면 클리어`
+        ? `정확한 공식 문구 ${curr.correctCount}개 연결 (${result.score}점) · 통과 및 케이블 점등!`
+        : `현재 ${result.score}점 (문구 ${curr.correctCount}개) · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과`
       const nextActionTip = result.cleared
-        ? '다음 판에서는 3연속 정확 입력 전류 보너스를 유지하며 최고 기록에 도전해 보세요.'
+        ? '통과 기준(10점)을 넘겼습니다! 남은 슬롯을 빠르게 연결해 최고 48점 TOP 10 기록에 도전해 보세요.'
         : curr.missedCount >= 5
           ? '바닥에 가까운 주황색 문구부터 먼저 입력해 놓침 횟수(5개 제한)를 줄여 보세요.'
-          : '오타는 감점이 없으니 차분히 완성한 뒤 Enter를 누르거나 여유롭게 도전 모드를 활용해 보세요.'
+          : '문구 1개당 +2점이며 오타 감점이 없습니다. 5개(10점)만 연결하면 바로 통과됩니다!'
       return {
         achievedHeadline,
         deltaText:
@@ -70,7 +70,7 @@ function formatResultFeedback(
             : null,
         nextActionTip,
         commentaryLines: [
-          `배점 규칙: 정확한 공식 문구 1개당 +100점 (클리어 기준 10개 = 1,000점)`,
+          `배점 규칙: 정확한 공식 문구 1개당 +2점 (10점 달성 시 통과 · 최대 48점 경쟁)`,
           `최대 연속 입력: ${curr.maxCombo}회 · 놓친 문구: ${curr.missedCount}개`,
           `핵심 문구 복습: "${bundle.records['mission-cable-future']?.display_ko}" / "${bundle.records['vision-global-leader']?.display_ko}"`,
         ],
@@ -78,15 +78,14 @@ function formatResultFeedback(
     }
 
     case 'snake': {
-      const prevCount = prev?.kind === 'snake' ? prev.completedSentences : null
-      const diff = prevCount !== null ? curr.completedSentences - prevCount : null
-      const need = Math.max(1, 3 - curr.completedSentences)
+      const prevCount = prev?.kind === 'snake' ? prev.correctChunks : null
+      const diff = prevCount !== null ? curr.correctChunks - prevCount : null
       const achievedHeadline = result.cleared
-        ? `공식 문장 ${curr.completedSentences}개 조립 완성 · 클리어 달성!`
-        : `문장 ${curr.completedSentences}개 완성 · ${need}개 더 완성하면 클리어`
+        ? `단어 조각 ${curr.correctChunks}개 · 문장 ${curr.completedSentences}개 완성 (${result.score}점) · 통과!`
+        : `현재 ${result.score}점 · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과`
       const pairHint = curr.confusedPairs[0]
         ? `헷갈린 두 조각 다시 보기: "${curr.confusedPairs[0].chosenText}" 대신 "${curr.confusedPairs[0].expectedText}" 순서입니다.`
-        : '벽과 내 몸통과의 간격을 2칸 이상 유지하며 HUD의 다음 조각 순서를 먼저 확인해 보세요.'
+        : '정답 단어 조각 1개당 +2점, 문장 완성 시 +2점 보너스가 추가되어 10점이 되면 통과됩니다.'
       const completedTexts = curr.completedSentenceIds
         .map((sid) => bundle.snakeSentences.find((s) => s.id === sid))
         .filter((s): s is NonNullable<typeof s> => Boolean(s))
@@ -95,13 +94,13 @@ function formatResultFeedback(
         achievedHeadline,
         deltaText:
           diff !== null
-            ? `같은 모드 직전 기록 대비 완성 문장 ${diff >= 0 ? `+${diff}` : diff}개`
+            ? `같은 모드 직전 기록 대비 수집 조각 ${diff >= 0 ? `+${diff}` : diff}개`
             : null,
         nextActionTip: result.cleared
-          ? '네 문장을 모두 무충돌로 완성해 만점(1,200점)에 도전해 보세요.'
+          ? '통과 후에도 문장이 계속 순환 출제됩니다. 무충돌로 더 많은 문장을 완성해 TOP 10 기록을 경신해 보세요!'
           : pairHint,
         commentaryLines: [
-          `배점 규칙: 서로 다른 완성 문장당 +300점 (클리어 기준 3문장 = 900점)`,
+          `배점 규칙: 정답 단어 조각 +2점, 문장 완성 보너스 +2점 (10점 달성 시 통과 · 연속 웨이브 경쟁)`,
           ...completedTexts,
         ],
       }
@@ -110,14 +109,13 @@ function formatResultFeedback(
     case 'shooter': {
       const prevCount = prev?.kind === 'shooter' ? prev.correctCount : null
       const diff = prevCount !== null ? curr.correctCount - prevCount : null
-      const need = Math.max(1, 8 - curr.correctCount)
       const achievedHeadline = result.cleared
-        ? `핵심가치 ${curr.correctCount}/12문항 정답 명중 · 클리어 달성!`
-        : `${curr.correctCount}문항 정답 · ${need}문항 더 맞히면 클리어`
+        ? `핵심가치 ${curr.correctCount}/12문항 정답 명중 (${result.score}점) · 통과!`
+        : `현재 ${result.score}점 (${curr.correctCount}문항 정답) · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과`
       const nextActionTip =
         curr.timeoutCount > 0
-          ? `시간 초과(${curr.timeoutCount}문항)가 있었습니다. 읽기 화면에서 정답 표적 위치를 먼저 정한 뒤 조준 시작을 눌러 보세요.`
-          : '설명 문구의 핵심 키워드(고객/원팀/안전·원칙/전문성)를 먼저 확인하고 표적을 조준해 보세요.'
+          ? `시간 초과(${curr.timeoutCount}문항)가 있었습니다. 읽기 화면에서 정답 표적을 먼저 고른 뒤 조준 시작을 눌러 보세요.`
+          : '마우스 이동·클릭 또는 방향키·Space로 조준할 수 있습니다. 5문항(10점) 이상 맞히면 통과되며 12문항 만점(24점)에 도전할 수 있습니다!'
       return {
         achievedHeadline,
         deltaText:
@@ -126,7 +124,7 @@ function formatResultFeedback(
             : null,
         nextActionTip,
         commentaryLines: [
-          `배점 규칙: 정답 명중 +100점, 오답·시간 초과 0점 (클리어 기준 8문항 = 800점)`,
+          `배점 규칙: 정답 명중 +2점, 오답·시간 초과 0점 (10점 달성 시 통과 · 최고 24점 경쟁)`,
           `C: ${bundle.records['core-c']?.display_ko} / O: ${bundle.records['core-o']?.display_ko}`,
           `R: ${bundle.records['core-r']?.display_ko} / E: ${bundle.records['core-e']?.display_ko}`,
         ],
@@ -137,8 +135,8 @@ function formatResultFeedback(
       const prevCount = prev?.kind === 'racing' ? prev.overtakeCount : null
       const diff = prevCount !== null ? curr.overtakeCount - prevCount : null
       const achievedHeadline = result.cleared
-        ? `정상 추월 ${curr.overtakeCount}대 · 종료 순점수 ${result.score}점으로 클리어!`
-        : `종료 순점수 ${result.score}점 · ${Math.max(50, 1000 - result.score)}점 더 확보하면 클리어`
+        ? `정상 추월 ${curr.overtakeCount}대 · 종료 순점수 ${result.score}점으로 통과!`
+        : `종료 순점수 ${result.score}점 · ${Math.max(1, 10 - result.score)}점 더 확보하면 통과`
       const cpLines = curr.checkpointRecordIds.map(
         (rid, idx) => `체크포인트 ${idx + 1}: ${bundle.records[rid]?.display_ko ?? rid}`,
       )
@@ -150,10 +148,10 @@ function formatResultFeedback(
             : null,
         nextActionTip:
           curr.collisionCount > 0
-            ? `충돌 ${curr.collisionCount}회(회당 −50점)가 있었습니다. 직선 빈 차선에서 부스터를 사용해 안전하게 추월해 보세요.`
-            : '직선 구간에서 부스터 2회를 모두 활용하면 더 많은 차량을 추월할 수 있습니다.',
+            ? `충돌 ${curr.collisionCount}회(회당 −1점)가 있었습니다. 빈 차선으로 미리 이동해 추월(+2점)해 보세요.`
+            : '정상 추월 1대당 +2점입니다. 직선 구간 부스터 2회를 활용해 최고 40점에 도전해 보세요!',
         commentaryLines: [
-          `배점 규칙: 정상 추월 +100점, 차량·장애물 충돌 −50점, 게이트 0점 (클리어 순점수 1,000점)`,
+          `배점 규칙: 정상 추월 +2점, 차량·장애물 충돌 −1점, 게이트 0점 (순점수 10점 이상 통과 · 최고 40점)`,
           `게이트 선택 결과: ${curr.gateCorrect ? '정답 게이트 통과 (조명 점등)' : '정답 표지 확인 완료'}`,
           ...cpLines,
         ],
@@ -167,8 +165,8 @@ function formatResultFeedback(
         (c) => !curr.everCollectedLetters.includes(c),
       )
       const achievedHeadline = result.cleared
-        ? `C·O·R·E ${curr.completedSets}세트 완성 (유효 명중 ${curr.validHits}회) · 클리어!`
-        : `세트 미완성 (${result.score}점) · 남은 글자 [${missing.join(', ') || '세트 완성 직전'}] 명중 시 클리어`
+        ? `유효 명중 ${curr.validHits}회 · C·O·R·E ${curr.completedSets}세트 (${result.score}점) · 통과!`
+        : `현재 ${result.score}점 · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과 (남은 글자: ${missing.join(', ') || '없음'})`
       return {
         achievedHeadline,
         deltaText:
@@ -176,10 +174,10 @@ function formatResultFeedback(
             ? `같은 모드 직전 기록 대비 완성 세트 ${diff >= 0 ? `+${diff}` : diff}세트`
             : null,
         nextActionTip: result.cleared
-          ? '남은 공으로 두 번째 C·O·R·E 세트 보너스(+500점)까지 노려 보세요.'
-          : '점수가 높아도 네 글자(C·O·R·E)를 모두 맞혀 1세트를 완성해야 클리어됩니다. 점등된 추천 경로의 플리퍼 각도를 노려 보세요.',
+          ? 'C·O·R·E 4글자 세트를 반복 완성할 때마다 +4점 보너스가 추가되어 고득점 경쟁에 유리합니다!'
+          : '좌·우 방향키(또는 화면 좌·우 클릭)로 플리퍼를 튕겨 상단 범퍼(+2점)와 C·O·R·E 세트 보너스(+4점)를 노려 보세요.',
         commentaryLines: [
-          `배점 규칙: 유효 범퍼 명중 +100점(300ms 간격), C·O·R·E 4글자 세트 완성 시 +500점`,
+          `배점 규칙: 유효 범퍼 명중 +2점, C·O·R·E 4글자 세트 완성 보너스 +4점 (10점 달성 시 통과)`,
           `C(${bundle.records['core-c']?.display_ko}) · O(${bundle.records['core-o']?.display_ko}) · R(${bundle.records['core-r']?.display_ko}) · E(${bundle.records['core-e']?.display_ko})`,
         ],
       }
@@ -188,12 +186,12 @@ function formatResultFeedback(
     case 'control-room': {
       return {
         achievedHeadline: result.cleared
-          ? `C·O·R·E 관제 패널 4개 복구 및 출구 작동 완료 · 관제등 점등!`
-          : `패널 ${curr.restoredPanels}/4 복구 · 네 패널 복구 후 출구를 작동하면 완료됩니다`,
+          ? `C·O·R·E 관제 패널 4개 복구 및 출구 작동 완료 (${result.score}점) · 관제등 점등!`
+          : `패널 ${curr.restoredPanels}/4 복구 (${result.score}점) · 네 패널 복구 후 출구를 작동하면 완료됩니다`,
         deltaText: null,
         nextActionTip: result.cleared
           ? '오락실 로비 상단의 보너스 관제등이 영구 점등되었습니다!'
-          : '화면 우측 패널 목록에서도 단서를 읽고 패널을 순서대로 복구할 수 있습니다.',
+          : '3D 벽면의 [C]·[O]·[R]·[E] 표지판 또는 우측 패널 목록을 눌러 단서와 맞는 패널을 복구하세요.',
         commentaryLines: bundle.controlRoomStages.map(
           (st) => `${st.correctPanelCode} (${st.deviceName}): ${bundle.records[st.recordId]?.explanation ?? ''}`,
         ),

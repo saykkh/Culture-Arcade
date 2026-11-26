@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 
 export interface ArcadePreferences {
   muted: boolean
+  bgmMuted: boolean
   reduceMotion: boolean
 }
 
@@ -9,6 +10,7 @@ const PREFS_STORAGE_KEY = 'ls-way-arcade:prefs:v04'
 
 const DEFAULT_PREFS: ArcadePreferences = {
   muted: false,
+  bgmMuted: false,
   reduceMotion: false,
 }
 
@@ -27,6 +29,7 @@ export function getArcadePreferences(): ArcadePreferences {
     const parsed = JSON.parse(raw) as Partial<ArcadePreferences>
     cachedPrefs = {
       muted: Boolean(parsed.muted),
+      bgmMuted: Boolean(parsed.bgmMuted),
       reduceMotion: Boolean(parsed.reduceMotion),
     }
     return cachedPrefs
@@ -59,10 +62,14 @@ function subscribe(listener: () => void): () => void {
 export function useArcadePreferences() {
   const prefs = useSyncExternalStore(subscribe, getArcadePreferences, () => DEFAULT_PREFS)
   const toggleMuted = useCallback(() => {
-    updateArcadePreferences({ muted: !getArcadePreferences().muted })
+    const nextMuted = !getArcadePreferences().muted
+    updateArcadePreferences({ muted: nextMuted })
+  }, [])
+  const toggleBgmMuted = useCallback(() => {
+    updateArcadePreferences({ bgmMuted: !getArcadePreferences().bgmMuted })
   }, [])
   const toggleReduceMotion = useCallback(() => {
     updateArcadePreferences({ reduceMotion: !getArcadePreferences().reduceMotion })
   }, [])
-  return { prefs, toggleMuted, toggleReduceMotion }
+  return { prefs, toggleMuted, toggleBgmMuted, toggleReduceMotion }
 }
