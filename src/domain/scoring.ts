@@ -4,8 +4,8 @@ import {
   buildSnakeSentenceSequence,
   buildTypingSchedule,
   getContentBundle,
-} from '../../content'
-import { GAME_CATALOG, normalizePhraseInput } from './rules'
+} from '../../content/index.js'
+import { GAME_CATALOG, normalizePhraseInput } from './rules.js'
 import type {
   ControlRoomRunEvent,
   CoreValueCode,
@@ -20,7 +20,7 @@ import type {
   ShooterRunEvent,
   SnakeRunEvent,
   TypingRunEvent,
-} from './types'
+} from './types.js'
 
 export interface ItemResponseOutcome {
   gameId: 'shooter' | 'control-room'

@@ -1,10 +1,10 @@
-import { GAME_CATALOG, REQUIRED_GAME_ORDER } from './rules'
+import { GAME_CATALOG, REQUIRED_GAME_ORDER } from './rules.js'
 import type {
   GameId,
   ParticipantProgressRecord,
   RecommendationBanner,
   RequiredGameId,
-} from './types'
+} from './types.js'
 
 export function computeLobbyRecommendation(
   progressByGame: Partial<Record<GameId, ParticipantProgressRecord>>,

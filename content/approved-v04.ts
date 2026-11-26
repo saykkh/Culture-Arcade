@@ -1,5 +1,5 @@
-import { SAMPLE_CONTENT_V04 } from './sample-v04'
-import type { LearningContentBundle } from './types'
+import { SAMPLE_CONTENT_V04 } from './sample-v04.js'
+import type { LearningContentBundle } from './types.js'
 
 /**
  * 담당자 원본 이미지 2종('LS전선 Way', '경영철학') 및 CI 최종 승인본을 반영하기 위한 슬롯입니다.

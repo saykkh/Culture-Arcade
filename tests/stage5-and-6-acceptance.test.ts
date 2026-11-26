@@ -6,9 +6,121 @@ import {
   SAMPLE_CONTENT_V04,
 } from '../content'
 import { ArcadeStore, SAMPLE_VIRTUAL_CODES } from '../server/store'
+import {
+  handleApiRequest,
+  PARTICIPANT_COOKIE_NAME,
+  PARTICIPANT_SYNC_COOKIE_NAME,
+} from '../server/router'
 import { ControlRoomSimulation } from '../src/games/control-room/engine'
 
+function extractCookieMap(setCookie: string | string[] | undefined): Record<string, string> {
+  const arr = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : []
+  const out: Record<string, string> = {}
+  for (const line of arr) {
+    const first = line.split(';')[0] ?? ''
+    const eq = first.indexOf('=')
+    if (eq > 0) {
+      out[first.slice(0, eq).trim()] = decodeURIComponent(first.slice(eq + 1).trim())
+    }
+  }
+  return out
+}
+
 describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계·30명 동시 부하 검증', () => {
+  it('Vercel 서버리스 리라이트(__path) 및 콜드스타트 멀티 컨테이너 환경에서도 1111-1111-1111 코드로 입장·닉네임·플레이·저장이 유지된다', async () => {
+    const fixedClock = () => new Date('2026-11-26T10:00:00Z')
+
+    // Container A: POST /api/index?__path=/api/session/code with 1111-1111-1111
+    const containerA = new ArcadeStore({ filePath: null, clock: fixedClock })
+    const loginRes = await handleApiRequest(
+      {
+        method: 'POST',
+        url: '/api/index?__path=/api/session/code',
+        headers: { 'x-forwarded-proto': 'https' },
+        body: { code: '1111-1111-1111' },
+      },
+      containerA,
+    )
+    expect(loginRes.status).toBe(200)
+    let cookieJar = extractCookieMap(loginRes.headers['Set-Cookie'])
+    expect(cookieJar[PARTICIPANT_COOKIE_NAME]).toBeTruthy()
+
+    const toCookieHeader = () =>
+      Object.entries(cookieJar)
+        .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+        .join('; ')
+
+    // Container B (brand-new cold instance!): PATCH nickname
+    const containerB = new ArcadeStore({ filePath: null, clock: fixedClock })
+    const nickRes = await handleApiRequest(
+      {
+        method: 'PATCH',
+        url: '/api/index?__path=/api/me/nickname',
+        headers: { cookie: toCookieHeader(), 'x-forwarded-proto': 'https' },
+        body: { nickname: '서버리스완주자' },
+      },
+      containerB,
+    )
+    expect(nickRes.status).toBe(200)
+    cookieJar = { ...cookieJar, ...extractCookieMap(nickRes.headers['Set-Cookie']) }
+
+    // Container C (brand-new cold instance!): POST start typing run
+    const containerC = new ArcadeStore({ filePath: null, clock: fixedClock })
+    const startRes = await handleApiRequest(
+      {
+        method: 'POST',
+        url: '/api/index?__path=/api/games/typing/runs',
+        headers: { cookie: toCookieHeader(), 'x-forwarded-proto': 'https' },
+        body: { mode: 'standard' },
+      },
+      containerC,
+    )
+    expect(startRes.status).toBe(201)
+    cookieJar = { ...cookieJar, ...extractCookieMap(startRes.headers['Set-Cookie']) }
+    const startedRun = JSON.parse(startRes.body) as { runId: string; seed: number }
+
+    // Container D (brand-new cold instance!): PUT finalize typing run -> clears S1!
+    const containerD = new ArcadeStore({ filePath: null, clock: fixedClock })
+    const sched = buildTypingSchedule(SAMPLE_CONTENT_V04, startedRun.seed, 'standard')
+    const finRes = await handleApiRequest(
+      {
+        method: 'PUT',
+        url: `/api/index?__path=/api/runs/${startedRun.runId}/result`,
+        headers: { cookie: toCookieHeader(), 'x-forwarded-proto': 'https' },
+        body: {
+          events: sched.slice(0, 10).map((s, idx) => ({
+            seq: idx + 1,
+            t_ms: (idx + 1) * 1000,
+            type: 'submit_phrase',
+            slotId: s.slotId,
+            input: s.displayKo,
+          })),
+          activeDurationMs: 15_000,
+          endReason: 'completed_all',
+        },
+      },
+      containerD,
+    )
+    expect(finRes.status).toBe(200)
+    cookieJar = { ...cookieJar, ...extractCookieMap(finRes.headers['Set-Cookie']) }
+    expect(cookieJar[PARTICIPANT_SYNC_COOKIE_NAME]).toBeTruthy()
+
+    // Container E (brand-new cold instance!): GET /api/me -> nickname & 1/5 cable intact!
+    const containerE = new ArcadeStore({ filePath: null, clock: fixedClock })
+    const meRes = await handleApiRequest(
+      {
+        method: 'GET',
+        url: '/api/index?__path=/api/me',
+        headers: { cookie: toCookieHeader(), 'x-forwarded-proto': 'https' },
+      },
+      containerE,
+    )
+    expect(meRes.status).toBe(200)
+    const meJson = JSON.parse(meRes.body)
+    expect(meJson.nickname).toBe('서버리스완주자')
+    expect(meJson.requiredClearedCount).toBe(1)
+    expect(meJson.litSockets.typing).toBe(true)
+  })
   it('테스트 입장코드 111111111111(하이픈 유무 무관)로 즉시 로그인할 수 있다', () => {
     const store = new ArcadeStore({ filePath: null, clock: () => new Date('2026-11-26T10:00:00Z') })
     const rawLogin = store.loginWithPersonalCode('111111111111', 'quick-ip-1')

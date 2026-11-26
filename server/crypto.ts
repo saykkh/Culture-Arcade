@@ -1,5 +1,5 @@
 import { createHmac, createHash, randomBytes } from 'node:crypto'
-import { formatParticipantCode, normalizeParticipantCode } from '../src/domain/rules'
+import { formatParticipantCode, normalizeParticipantCode } from '../src/domain/rules.js'
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
@@ -25,10 +25,63 @@ export function computeCodeLookupDigest(rawCode: string): string {
   return createHmac('sha256', getCodePepper()).update(`code:${normalized}`).digest('hex')
 }
 
-export function generateSessionToken(): { token: string; lookupDigest: string } {
-  const token = randomBytes(32).toString('hex')
+export function generateSessionToken(meta?: {
+  participantId: string
+  generation: number
+  expiresAtMs: number
+}): { token: string; lookupDigest: string } {
+  const nonce = randomBytes(24).toString('hex')
+  let token = nonce
+  if (meta) {
+    const payload = `${nonce}.${meta.participantId}.${meta.generation}.${meta.expiresAtMs}`
+    const sig = createHmac('sha256', getAdminSecret()).update(`psess:${payload}`).digest('hex')
+    token = `${payload}.${sig}`
+  }
   const lookupDigest = computeSessionLookupDigest(token)
   return { token, lookupDigest }
+}
+
+export function verifySignedParticipantToken(
+  token: string | undefined,
+  nowMs: number = Date.now(),
+): { participantId: string; generation: number; expiresAtMs: number } | null {
+  if (!token) return null
+  const parts = token.split('.')
+  if (parts.length !== 5) return null
+  const [nonce, participantId, genStr, expStr, sig] = parts
+  if (!nonce || !participantId || !genStr || !expStr || !sig) return null
+  const generation = Number(genStr)
+  const expiresAtMs = Number(expStr)
+  if (!Number.isInteger(generation) || !Number.isFinite(expiresAtMs) || nowMs > expiresAtMs) {
+    return null
+  }
+  const payload = `${nonce}.${participantId}.${genStr}.${expStr}`
+  const expectedSig = createHmac('sha256', getAdminSecret())
+    .update(`psess:${payload}`)
+    .digest('hex')
+  if (sig !== expectedSig) return null
+  return { participantId, generation, expiresAtMs }
+}
+
+export function signJsonPayload(data: unknown): string {
+  const b64 = Buffer.from(JSON.stringify(data), 'utf8').toString('base64url')
+  const sig = createHmac('sha256', getAdminSecret()).update(`sync:${b64}`).digest('base64url')
+  return `${b64}.${sig}`
+}
+
+export function verifySignedJsonPayload<T>(raw: string | undefined): T | null {
+  if (!raw) return null
+  const dot = raw.indexOf('.')
+  if (dot <= 0) return null
+  const b64 = raw.slice(0, dot)
+  const sig = raw.slice(dot + 1)
+  const expected = createHmac('sha256', getAdminSecret()).update(`sync:${b64}`).digest('base64url')
+  if (sig !== expected) return null
+  try {
+    return JSON.parse(Buffer.from(b64, 'base64url').toString('utf8')) as T
+  } catch {
+    return null
+  }
 }
 
 export function computeSessionLookupDigest(token: string): string {

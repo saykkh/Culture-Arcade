@@ -1,14 +1,26 @@
-import { createAdminSessionToken, verifyAdminSessionToken } from './crypto'
-import { ArcadeApiError, ArcadeStore, getDefaultArcadeStore, SAMPLE_VIRTUAL_CODES } from './store'
+import {
+  createAdminSessionToken,
+  signJsonPayload,
+  verifyAdminSessionToken,
+  verifySignedJsonPayload,
+} from './crypto.js'
+import {
+  ArcadeApiError,
+  ArcadeStore,
+  type EphemeralParticipantSync,
+  getDefaultArcadeStore,
+  SAMPLE_VIRTUAL_CODES,
+} from './store.js'
 import type {
   GameMode,
   GameRunEvent,
   ParticipantDueStatus,
   ParticipantLearningStatus,
   RunEndReason,
-} from '../src/domain/types'
+} from '../src/domain/types.js'
 
 export const PARTICIPANT_COOKIE_NAME = 'arcade_session'
+export const PARTICIPANT_SYNC_COOKIE_NAME = 'arcade_ephemeral_sync'
 export const ADMIN_COOKIE_NAME = 'arcade_admin_session'
 
 export interface HttpApiRequest {
@@ -115,18 +127,60 @@ export async function handleApiRequest(
   store: ArcadeStore = getDefaultArcadeStore(),
 ): Promise<HttpApiResponse> {
   const parsedUrl = new URL(req.url, 'http://localhost')
-  const pathname = parsedUrl.pathname
+  const rewrittenPath = parsedUrl.searchParams.get('__path')
+  const pathname =
+    rewrittenPath && rewrittenPath.startsWith('/api/') ? rewrittenPath : parsedUrl.pathname
   const method = req.method.toUpperCase()
   const cookies = parseCookies(getHeaderString(req.headers, 'cookie'))
   const secureCookie = isHttpsRequest(req.headers)
   const clientIp =
     getHeaderString(req.headers, 'x-forwarded-for')?.split(',')[0]?.trim() || 'local'
 
+  const sessionToken = cookies[PARTICIPANT_COOKIE_NAME]
+  const incomingSync = verifySignedJsonPayload<EphemeralParticipantSync>(
+    cookies[PARTICIPANT_SYNC_COOKIE_NAME],
+  )
+  if (sessionToken && incomingSync) {
+    store.hydrateFromEphemeralSync(sessionToken, incomingSync)
+  }
+
+  const withSyncCookie = (token: string | undefined): Record<string, string | string[]> => {
+    const sync = store.exportEphemeralSync(token)
+    if (!sync) return {}
+    return {
+      'Set-Cookie': buildCookieHeader(
+        PARTICIPANT_SYNC_COOKIE_NAME,
+        signJsonPayload(sync),
+        43_200,
+        secureCookie,
+      ),
+    }
+  }
+
   try {
     // 1. POST /api/session/code
     if (method === 'POST' && pathname === '/api/session/code') {
       const body = (req.body ?? {}) as { code?: string }
       const result = store.loginWithPersonalCode(String(body.code ?? ''), clientIp)
+      const sync = store.exportEphemeralSync(result.sessionToken)
+      const setCookies = [
+        buildCookieHeader(
+          PARTICIPANT_COOKIE_NAME,
+          result.sessionToken,
+          43_200,
+          secureCookie,
+        ),
+      ]
+      if (sync) {
+        setCookies.push(
+          buildCookieHeader(
+            PARTICIPANT_SYNC_COOKIE_NAME,
+            signJsonPayload(sync),
+            43_200,
+            secureCookie,
+          ),
+        )
+      }
       return jsonResponse(
         200,
         {
@@ -135,14 +189,7 @@ export async function handleApiRequest(
           availableFromDate: result.availableFromDate,
           nickname: result.nickname,
         },
-        {
-          'Set-Cookie': buildCookieHeader(
-            PARTICIPANT_COOKIE_NAME,
-            result.sessionToken,
-            43_200,
-            secureCookie,
-          ),
-        },
+        { 'Set-Cookie': setCookies },
       )
     }
 
@@ -153,7 +200,10 @@ export async function handleApiRequest(
         200,
         { ok: true },
         {
-          'Set-Cookie': buildCookieHeader(PARTICIPANT_COOKIE_NAME, '', 0, secureCookie),
+          'Set-Cookie': [
+            buildCookieHeader(PARTICIPANT_COOKIE_NAME, '', 0, secureCookie),
+            buildCookieHeader(PARTICIPANT_SYNC_COOKIE_NAME, '', 0, secureCookie),
+          ],
         },
       )
     }
@@ -195,7 +245,7 @@ export async function handleApiRequest(
         cookies[PARTICIPANT_COOKIE_NAME],
         String(body.nickname ?? ''),
       )
-      return jsonResponse(200, updated)
+      return jsonResponse(200, updated, withSyncCookie(cookies[PARTICIPANT_COOKIE_NAME]))
     }
 
     // 5. GET /api/me
@@ -211,7 +261,7 @@ export async function handleApiRequest(
       const body = (req.body ?? {}) as { mode?: GameMode }
       const mode: GameMode = body.mode === 'assisted' ? 'assisted' : 'standard'
       const created = await store.startGameRun(cookies[PARTICIPANT_COOKIE_NAME], gameId, mode)
-      return jsonResponse(201, created)
+      return jsonResponse(201, created, withSyncCookie(cookies[PARTICIPANT_COOKIE_NAME]))
     }
 
     // 7. PUT /api/runs/[runId]/result
@@ -230,7 +280,7 @@ export async function handleApiRequest(
         endReason: (body.endReason ?? 'time_up') as RunEndReason,
         renderMode: body.renderMode,
       })
-      return jsonResponse(200, finalized)
+      return jsonResponse(200, finalized, withSyncCookie(cookies[PARTICIPANT_COOKIE_NAME]))
     }
 
     // 8. GET /api/leaderboards/[gameId]
