@@ -1,6 +1,6 @@
-import { initializeApp, type FirebaseOptions } from 'firebase/app'
-import { getFirestore } from 'firebase/firestore'
-import { getStorage } from 'firebase/storage'
+import { initializeApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app'
+import { getFirestore, type Firestore } from 'firebase/firestore'
+import { getStorage, type FirebaseStorage } from 'firebase/storage'
 
 const firebaseConfig: FirebaseOptions = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -11,16 +11,12 @@ const firebaseConfig: FirebaseOptions = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-const missingKeys = Object.entries(firebaseConfig)
-  .filter(([, value]) => !value)
-  .map(([key]) => key)
+export const isFirebaseConfigured = Object.values(firebaseConfig).every(
+  (value) => typeof value === 'string' && value.length > 0,
+)
 
-if (missingKeys.length > 0) {
-  throw new Error(
-    `Missing Firebase environment variables for: ${missingKeys.join(', ')}. Check your .env.local file.`,
-  )
-}
-
-export const app = initializeApp(firebaseConfig)
-export const db = getFirestore(app)
-export const storage = getStorage(app)
+export const app: FirebaseApp | null = isFirebaseConfigured
+  ? initializeApp(firebaseConfig)
+  : null
+export const db: Firestore | null = app ? getFirestore(app) : null
+export const storage: FirebaseStorage | null = app ? getStorage(app) : null

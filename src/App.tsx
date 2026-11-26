@@ -1,121 +1,147 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useCallback, useEffect, useState } from 'react'
+import { isValidGameId } from './domain/rules'
+import { arcadeApi, type ParticipantMeResponse } from './lib/api'
+import { AdminPage } from './pages/AdminPage'
+import { ArcadeLobbyPage } from './pages/ArcadeLobbyPage'
+import { CodeEntryPage } from './pages/CodeEntryPage'
+import { GameCabinetPage } from './pages/GameCabinetPage'
+import { LeaderboardPage } from './pages/LeaderboardPage'
 
-function App() {
-  const [count, setCount] = useState(0)
+function useLocationState() {
+  const [loc, setLoc] = useState(() => ({
+    pathname: window.location.pathname,
+    search: window.location.search,
+  }))
+
+  useEffect(() => {
+    const onPopState = () => {
+      setLoc({ pathname: window.location.pathname, search: window.location.search })
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const navigate = useCallback((to: string) => {
+    if (window.location.pathname + window.location.search === to) return
+    window.history.pushState(null, '', to)
+    setLoc({ pathname: window.location.pathname, search: window.location.search })
+  }, [])
+
+  return { pathname: loc.pathname, search: loc.search, navigate }
+}
+
+export function App() {
+  const { pathname, search, navigate } = useLocationState()
+  const [me, setMe] = useState<ParticipantMeResponse | null>(null)
+  const [booting, setBooting] = useState(true)
+  const [justLitGameId, setJustLitGameId] = useState<string | null>(null)
+
+  const refreshMe = useCallback(async () => {
+    try {
+      const data = await arcadeApi.getMe()
+      setMe(data)
+    } catch {
+      setMe(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void arcadeApi
+      .getMe()
+      .then((data) => {
+        if (active) setMe(data)
+      })
+      .catch(() => {
+        if (active) setMe(null)
+      })
+      .finally(() => {
+        if (active) setBooting(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const handleLogout = useCallback(async () => {
+    await arcadeApi.logout().catch(() => null)
+    setMe(null)
+    setJustLitGameId(null)
+    navigate('/')
+  }, [navigate])
+
+  if (booting) {
+    return (
+      <div className="arcade-shell">
+        <div className="center-card-wrap">
+          <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
+            <div className="sign-brand" style={{ justifyContent: 'center', marginBottom: 8 }}>
+              <span className="sign-brand-ko">LS전선</span>
+              <span className="sign-brand-en">WAY ARCADE</span>
+            </div>
+            <div style={{ color: 'var(--text-muted)' }}>오락실 전원을 켜는 중...</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Admin Console is independently accessible via /admin
+  if (pathname === '/admin') {
+    return <AdminPage me={me} onNavigate={navigate} />
+  }
+
+  // Require ready participant session for /arcade, /games/*, /leaderboard
+  const participantReady = Boolean(me && !me.beforeStartDate && !me.requiresNickname)
+  if (!participantReady || pathname === '/') {
+    return (
+      <CodeEntryPage
+        me={me}
+        onAuthenticated={refreshMe}
+        onNavigate={navigate}
+        onLogout={handleLogout}
+      />
+    )
+  }
+
+  if (pathname === '/leaderboard') {
+    const qs = new URLSearchParams(search)
+    return (
+      <LeaderboardPage
+        me={me!}
+        initialGameId={qs.get('game')}
+        onNavigate={navigate}
+        onLogout={handleLogout}
+      />
+    )
+  }
+
+  const gameMatch = pathname.match(/^\/games\/([a-z0-9-]+)$/)
+  if (gameMatch && isValidGameId(gameMatch[1]!)) {
+    return (
+      <GameCabinetPage
+        key={gameMatch[1]!}
+        gameId={gameMatch[1]!}
+        me={me!}
+        onRunConfirmed={async (litId) => {
+          if (litId) setJustLitGameId(litId)
+          await refreshMe()
+        }}
+        onNavigate={navigate}
+        onLogout={handleLogout}
+      />
+    )
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <ArcadeLobbyPage
+      key={`${me!.participantId}:${me!.recommendation.targetGameId ?? 'all'}`}
+      me={me!}
+      justLitGameId={justLitGameId}
+      onRefreshMe={refreshMe}
+      onNavigate={navigate}
+      onLogout={handleLogout}
+    />
   )
 }
 
