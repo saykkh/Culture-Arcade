@@ -54,6 +54,7 @@ export interface RunnerSnapshot {
   lane: LaneIndex
   visualLane: number
   jumpHeight: number
+  jumpRemainingMs: number
   isSuperJump: boolean
   hasShield: boolean
   speedMultiplier: number
@@ -630,6 +631,7 @@ export class RunnerSimulation {
       lane: this.lane,
       visualLane: this.visualLane,
       jumpHeight: this.getJumpHeight(),
+      jumpRemainingMs: this.jumpRemainingMs,
       isSuperJump: this.isSuperJump,
       hasShield: this.hasShield,
       speedMultiplier: this.getSpeedMultiplier(),

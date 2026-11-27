@@ -18,6 +18,11 @@ export interface ParticipantGameSummary {
   firstClearedAt: string | null
   lastStartedAt: string | null
   finalizedAttemptCount: number
+  latestAttempt?: {
+    score: number
+    cleared: boolean
+    actionSummary: GameActionSummary
+  } | null
   cleared: boolean
 }
 

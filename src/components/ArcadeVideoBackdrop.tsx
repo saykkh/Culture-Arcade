@@ -51,8 +51,6 @@ export function ArcadeVideoBackdrop({ intensity = 'vivid' }: ArcadeVideoBackdrop
       canvas.width = width
       canvas.height = height
     }
-    syncSize()
-    window.addEventListener('resize', syncSize)
 
     const isVivid = intensity === 'vivid'
     const pulses: PulseOrb[] = Array.from({ length: isVivid ? 18 : 8 }, (_, i) => ({
@@ -224,10 +222,12 @@ export function ArcadeVideoBackdrop({ intensity = 'vivid' }: ArcadeVideoBackdrop
       }
     }
 
-    if (prefs.reduceMotion) {
+    const resize = () => {
+      syncSize()
       drawFrame(0)
-      return () => window.removeEventListener('resize', syncSize)
     }
+    resize()
+    window.addEventListener('resize', resize)
 
     const loop = (now: number) => {
       const dtSec = Math.min(0.08, Math.max(0, (now - lastTs) / 1000))
@@ -238,10 +238,10 @@ export function ArcadeVideoBackdrop({ intensity = 'vivid' }: ArcadeVideoBackdrop
       rafId = window.requestAnimationFrame(loop)
     }
 
-    rafId = window.requestAnimationFrame(loop)
+    if (!prefs.reduceMotion) rafId = window.requestAnimationFrame(loop)
     return () => {
       window.cancelAnimationFrame(rafId)
-      window.removeEventListener('resize', syncSize)
+      window.removeEventListener('resize', resize)
     }
   }, [intensity, prefs.reduceMotion])
 

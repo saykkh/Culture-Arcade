@@ -839,6 +839,21 @@ export class ArcadeStore {
       this.state.learningVersions[0]!
     const bundle = getContentBundle(lv.contentVersion)
     const progressByGame = this.getProgressMap(participant.id)
+    const latestAttempts = new Map<GameId, StoredGameRun>()
+    for (const run of this.state.runs) {
+      if (
+        run.participantId !== participant.id ||
+        run.contentVersion !== lv.contentVersion ||
+        run.status !== 'finalized' ||
+        !run.finalizedAt ||
+        !run.actionSummary ||
+        run.score === null
+      ) continue
+      const previous = latestAttempts.get(run.gameId)
+      if (!previous?.finalizedAt || previous.finalizedAt <= run.finalizedAt) {
+        latestAttempts.set(run.gameId, run)
+      }
+    }
 
     const litSockets: Record<string, boolean> = {}
     let requiredClearedCount = 0
@@ -853,6 +868,7 @@ export class ArcadeStore {
     const games = ALL_GAME_IDS.map((gid) => {
       const prog = progressByGame[gid]
       const meta = GAME_CATALOG[gid]
+      const latest = latestAttempts.get(gid)
       return {
         gameId: gid,
         title: meta.title,
@@ -862,6 +878,9 @@ export class ArcadeStore {
         firstClearedAt: prog?.firstClearedAt ?? null,
         lastStartedAt: prog?.lastStartedAt ?? null,
         finalizedAttemptCount: prog?.finalizedAttemptCount ?? 0,
+        latestAttempt: latest?.actionSummary && latest.score !== null
+          ? { score: latest.score, cleared: Boolean(latest.cleared), actionSummary: latest.actionSummary }
+          : null,
         cleared: Boolean(prog?.firstClearedAt),
       }
     })

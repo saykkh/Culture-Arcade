@@ -224,6 +224,7 @@ export function CodeEntryPage({
               <div style={{ display: 'grid', gridTemplateColumns: '190px 1fr', gap: 14, alignItems: 'center' }}>
                 <div
                   style={{
+                    position: 'relative',
                     height: 92,
                     borderRadius: 9,
                     overflow: 'hidden',

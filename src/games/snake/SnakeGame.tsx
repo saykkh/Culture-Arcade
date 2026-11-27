@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { buildSnakeSentenceSequence, getContentBundle } from '../../../content'
 import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
+import { MobileGameHud } from '../../components/MobileGameHud'
 import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, LearningDomain, RunEndReason, SnakeRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -83,9 +84,18 @@ export function SnakeGame({
   const [completedSentences, setCompletedSentences] = useState(0)
   const [snakeBody, setSnakeBody] = useState<GridPoint[]>(initialSnake.body)
   const [directionState, setDirectionState] = useState<GridDirection>(initialSnake.direction)
+  const [previewDirection, setPreviewDirection] = useState<GridDirection | null>(null)
   const [candidates, setCandidates] = useState<CandidateChunkOnGrid[]>(initialCandidates)
   const [practiceCleared, setPracticeCleared] = useState(false)
-  const [eatBurst, setEatBurst] = useState<{ x: number; y: number; label: string } | null>(null)
+  const [eatBurst, setEatBurst] = useState<{ x: number; y: number; startedMs: number } | null>(null)
+  const [wordTransfer, setWordTransfer] = useState<{
+    word: string
+    x: number
+    y: number
+    dx: number
+    dy: number
+    startedMs: number
+  } | null>(null)
   const [waveShock, setWaveShock] = useState<{ x: number; y: number; startedMs: number } | null>(
     null,
   )
@@ -105,6 +115,7 @@ export function SnakeGame({
   })
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const sentenceHudRef = useRef<HTMLDivElement | null>(null)
   const finishedRef = useRef(false)
   const elapsedRef = useRef(0)
   const moveAccumRef = useRef(0)
@@ -171,6 +182,13 @@ export function SnakeGame({
     })
   }, [wrongOverlay, sentences, seed])
 
+  const queueDirectionInput = useCallback((desired: GridDirection) => {
+    if (finishedRef.current || modalPausedRef.current || tabPaused) return
+    if (desired === (queuedDirRef.current ?? dirRef.current) || isOppositeDirection(dirRef.current, desired)) return
+    queuedDirRef.current = desired
+    setPreviewDirection(desired)
+  }, [tabPaused])
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (finishedRef.current) return
@@ -202,25 +220,13 @@ export function SnakeGame({
       if (desired) {
         e.preventDefault()
         e.stopPropagation()
-        const baseDir = queuedDirRef.current ?? dirRef.current
-        if (desired !== baseDir && !isOppositeDirection(baseDir, desired)) {
-          queuedDirRef.current = desired
-        }
+        queueDirectionInput(desired)
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [wrongOverlay, tabPaused, confirmWrongOverlay])
-
-  const queueDirectionInput = useCallback((desired: GridDirection) => {
-    if (finishedRef.current || modalPausedRef.current) return
-    const baseDir = queuedDirRef.current ?? dirRef.current
-    if (desired !== baseDir && !isOppositeDirection(baseDir, desired)) {
-      queuedDirRef.current = desired
-      playArcadeSfx('select')
-    }
-  }, [])
+  }, [wrongOverlay, tabPaused, confirmWrongOverlay, queueDirectionInput])
 
   const isSimulationPaused = tabPaused || Boolean(wrongOverlay) || practiceCleared
 
@@ -233,6 +239,7 @@ export function SnakeGame({
       if (queuedDirRef.current && !isOppositeDirection(dirRef.current, queuedDirRef.current)) {
         dirRef.current = queuedDirRef.current
         setDirectionState(dirRef.current)
+        setPreviewDirection(null)
       }
       queuedDirRef.current = null
 
@@ -324,8 +331,23 @@ export function SnakeGame({
 
         if (hitCandidate.isCorrect) {
           if (!prefs.reduceMotion) {
-            setEatBurst({ x: nextHead.x, y: nextHead.y, label: '+2점!' })
-            window.setTimeout(() => setEatBurst(null), 420)
+            setEatBurst({ x: nextHead.x, y: nextHead.y, startedMs: nowMs })
+            const canvas = canvasRef.current
+            const slot = sentenceHudRef.current?.querySelector(`[data-snake-chunk="${curStep}"]`)
+            if (canvas && slot) {
+              const rect = canvas.getBoundingClientRect()
+              const target = slot.getBoundingClientRect()
+              const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height)
+              const x = rect.left + (rect.width - canvas.width * scale) / 2 + (nextHead.x + 0.5) * canvas.width * scale / SNAKE_GRID_COLS
+              const y = rect.top + (rect.height - canvas.height * scale) / 2 + (nextHead.y + 0.5) * canvas.height * scale / SNAKE_GRID_ROWS
+              setWordTransfer({
+                word: hitCandidate.text,
+                x, y,
+                dx: target.left + target.width / 2 - x,
+                dy: target.top + target.height / 2 - y,
+                startedMs: nowMs,
+              })
+            }
           }
           // Cap max visual tail length at 12 so endless high-score play stays nimble & fun!
           const grownBody = [nextHead, ...currentBody].slice(0, 12)
@@ -599,7 +621,16 @@ export function SnakeGame({
     const nearAnyOrb = candidates.some(
       (c) => Math.hypot(c.x - head.x, c.y - head.y) <= 2.4,
     )
-    const dirVec = DIRECTION_DELTAS[directionState]
+    const dirVec = DIRECTION_DELTAS[previewDirection ?? directionState]
+    const next = { x: head.x + dirVec.x, y: head.y + dirVec.y }
+    if (isInsideGrid(next)) {
+      ctx.save()
+      ctx.strokeStyle = '#78EFF5AA'
+      ctx.setLineDash([5, 4])
+      ctx.lineWidth = 2
+      ctx.strokeRect(next.x * cellW + 3, next.y * cellH + 3, cellW - 6, cellH - 6)
+      ctx.restore()
+    }
 
     ctx.save()
     ctx.translate(headCx, headCy)
@@ -623,10 +654,11 @@ export function SnakeGame({
     ctx.fill()
 
     // Chomping glowing mouth when approaching a word capsule!
-    if (nearAnyOrb) {
+    const isChomping = eatBurst && elapsedMs - eatBurst.startedMs < 160 && !prefs.reduceMotion
+    if (nearAnyOrb || isChomping) {
       ctx.fillStyle = '#061019'
       ctx.beginPath()
-      ctx.arc(dirVec.x * 14, dirVec.y * 11, 7, 0, Math.PI * 2)
+      ctx.arc(dirVec.x * 14, dirVec.y * 11, isChomping ? 9 : 6, 0, Math.PI * 2)
       ctx.fill()
     }
 
@@ -699,7 +731,7 @@ export function SnakeGame({
       ctx.fillText(label, clampedX, pillY + 0.5)
     }
 
-    if (eatBurst && !prefs.reduceMotion) {
+    if (eatBurst && elapsedMs - eatBurst.startedMs < 420 && !prefs.reduceMotion) {
       const bx = (eatBurst.x + 0.5) * cellW
       const by = (eatBurst.y + 0.5) * cellH
       ctx.save()
@@ -710,10 +742,10 @@ export function SnakeGame({
       ctx.stroke()
       ctx.font = '900 18px "Paperlogy", sans-serif'
       ctx.fillStyle = '#B9F66C'
-      ctx.fillText(eatBurst.label, bx, by - 26)
+      ctx.fillText('+2점!', bx, by - 26)
       ctx.restore()
     }
-  }, [snakeBody, candidates, directionState, eatBurst, elapsedMs, prefs.reduceMotion, waveShock])
+  }, [snakeBody, candidates, directionState, previewDirection, eatBurst, elapsedMs, prefs.reduceMotion, waveShock])
 
   const currentSentence = sentences[sentenceCursor % sentences.length]!
   const collectedChunks = currentSentence.chunks.slice(0, stepIdx)
@@ -726,16 +758,17 @@ export function SnakeGame({
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 6 }}>
       {/* Compact Wide HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0, padding: '6px 12px' }}>
+        <MobileGameHud remaining={`${remainingSec}s`} score={score} practice={isPractice} practiceCleared={practiceCleared} detail={!isPractice && <span aria-label={`남은 목숨 ${lives}개`}>{'♥'.repeat(lives)}{'♡'.repeat(3 - lives)}</span>} />
         <div className="hud-metric">
           <CoreBotMascot
             mood={
-              cleared
-                ? 'crown'
-                : lives === 1 || wrongOverlay
-                  ? 'danger'
-                  : completedSentences >= 1
+              wrongOverlay || lives === 1
+                ? 'danger'
+                : cleared || practiceCleared
+                  ? 'victory'
+                  : toastBanner.tone === 'clear'
                     ? 'fever'
-                    : 'cheer'
+                    : 'idle'
             }
             size={36}
           />
@@ -784,10 +817,10 @@ export function SnakeGame({
         </div>
       </div>
 
-      {!isPractice && <PassMilestoneBanner cleared={cleared} score={score} />}
-
       {/* Inline Sentence Assembly + Live Toast Strip */}
       <div
+        className="snake-sentence-hud"
+        ref={sentenceHudRef}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -810,6 +843,7 @@ export function SnakeGame({
             return (
               <span
                 key={i}
+                data-snake-chunk={i}
                 style={{
                   padding: '2px 9px',
                   borderRadius: 999,
@@ -841,6 +875,7 @@ export function SnakeGame({
         </div>
 
         <span
+          className="snake-sentence-notice"
           style={{
             fontSize: 13,
             color:
@@ -855,9 +890,25 @@ export function SnakeGame({
           {toastBanner.text}
         </span>
       </div>
+      {!prefs.reduceMotion && wordTransfer && elapsedMs - wordTransfer.startedMs < 560 && (
+        <span
+          key={wordTransfer.startedMs}
+          className="snake-word-transfer"
+          aria-hidden="true"
+          style={{
+            left: wordTransfer.x,
+            top: wordTransfer.y,
+            '--transfer-x': `${wordTransfer.dx}px`,
+            '--transfer-y': `${wordTransfer.dy}px`,
+          } as CSSProperties}
+        >
+          {wordTransfer.word}
+        </span>
+      )}
 
       {/* Full-Width Spacious 20x12 Neon Arena */}
       <div
+        className="game-arena game-arena-snake"
         style={{
           position: 'relative',
           flex: 1,
@@ -871,6 +922,7 @@ export function SnakeGame({
           minHeight: 430,
         }}
       >
+        {!isPractice && cleared && <PassMilestoneBanner score={score} />}
         <canvas
           ref={canvasRef}
           width={1100}
@@ -954,6 +1006,7 @@ export function SnakeGame({
 
       {/* Tactile Arcade D-Pad Controls (Mouse / Touch / Keyboard Friendly) */}
       <div
+        className="game-touch-controls"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildTypingSchedule, getContentBundle } from '../../../content'
 import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
+import { MobileGameHud } from '../../components/MobileGameHud'
 import { BASE_ACTION_POINTS, normalizePhraseInput, PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, RunEndReason, TypingRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -77,7 +78,7 @@ export function TypingGame({
   const [laserShot, setLaserShot] = useState<{
     targetX: number
     targetY: number
-    text: string
+    startedMs: number
   } | null>(null)
 
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -200,7 +201,7 @@ export function TypingGame({
 
     const w = canvas.width
     const h = canvas.height
-    const tSec = elapsedMs / 1000
+    const tSec = prefs.reduceMotion ? 0 : elapsedMs / 1000
 
     // Sky gradient (shifts into vibrant cyan-magenta aurora during 3+ COMBO FEVER!)
     const bgGrad = ctx.createLinearGradient(0, 0, 0, h)
@@ -294,6 +295,18 @@ export function TypingGame({
     ctx.arc(cx + 7, cy - 17 + bob, 3.5, 0, Math.PI * 2)
     ctx.fill()
 
+    ctx.strokeStyle = '#89BDDF'
+    ctx.lineWidth = 3
+    ctx.lineCap = 'round'
+    for (const side of [-1, 1]) {
+      const handY = cy + 8 + Math.sin(tSec * (9 + combo) + side) * 3
+      ctx.beginPath()
+      ctx.moveTo(cx + side * 17, cy - 9)
+      ctx.lineTo(cx + side * 32, cy - 3)
+      ctx.lineTo(cx + side * 24, handY)
+      ctx.stroke()
+    }
+
     // Shatter Explosion Sparks when words are cleared!
     shatterSparksRef.current = shatterSparksRef.current
       .map((sp) => ({
@@ -323,6 +336,11 @@ export function TypingGame({
       !clearedSlotIds.includes(s.slotId) &&
       !missedSlotIds.includes(s.slotId),
   )
+  const urgentSlot = visibleSlots.reduce<(typeof visibleSlots)[number] | undefined>(
+    (earliest, slot) => !earliest || slot.deadlineMs < earliest.deadlineMs ? slot : earliest,
+    undefined,
+  )
+  const typedClean = inputValue.normalize('NFC').trimStart()
 
   const submitCurrentInput = (rawText: string) => {
     if (finishedRef.current || paused || practiceCleared) return
@@ -352,15 +370,21 @@ export function TypingGame({
     if (matchedCandidates.length > 0) {
       const target = matchedCandidates[0]!
       const hitProg = Math.min(1, Math.max(0, (nowMs - target.spawnMs) / target.fallDurationMs))
-      const hitTopPct = 6 + hitProg * 75
-      const hitLeftPct = isPractice ? 50 : 1.5 + target.lane * 24.5 + 11.5
       if (!prefs.reduceMotion) {
+        const arena = bgCanvasRef.current?.parentElement
+        const bounds = arena?.getBoundingClientRect()
+        const phrase = arena?.querySelector(`[data-slot="${target.slotId}"]`)?.getBoundingClientRect()
+        const hitLeftPct = bounds && phrase && bounds.width
+          ? (phrase.left + phrase.width / 2 - bounds.left) / bounds.width * 100
+          : isPractice ? 50 : 13 + target.lane * 24.5
+        const hitTopPct = bounds && phrase && bounds.height
+          ? (phrase.top + phrase.height / 2 - bounds.top) / bounds.height * 100
+          : 10 + hitProg * 75
         setLaserShot({
           targetX: hitLeftPct,
-          targetY: hitTopPct + 4,
-          text: `+${BASE_ACTION_POINTS}점!`,
+          targetY: hitTopPct,
+          startedMs: nowMs,
         })
-        window.setTimeout(() => setLaserShot(null), 360)
 
         const px = (hitLeftPct / 100) * 1040
         const py = (hitTopPct / 100) * 380
@@ -456,6 +480,7 @@ export function TypingGame({
 
   return (
     <div
+      className="typing-game"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -470,16 +495,17 @@ export function TypingGame({
     >
       {/* HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0 }}>
+        <MobileGameHud remaining={`${remainingSec}s`} score={score} practice={isPractice} practiceCleared={practiceCleared} detail={<>{combo}연속 · 놓침 {missedSlotIds.length}/5</>} />
         <div className="hud-metric">
           <CoreBotMascot
             mood={
-              cleared
-                ? 'crown'
+              feedback.tone === 'retry' || missedSlotIds.length >= 4
+                ? 'danger'
                 : combo >= 3
                   ? 'fever'
-                  : missedSlotIds.length >= 3
-                    ? 'danger'
-                    : 'cheer'
+                  : cleared || practiceCleared
+                    ? 'victory'
+                    : 'idle'
             }
             size={38}
           />
@@ -555,10 +581,9 @@ export function TypingGame({
         </div>
       )}
 
-      {!isPractice && <PassMilestoneBanner cleared={cleared} score={score} />}
-
       {/* Falling Phrase Stage with Live Cyber-City & Bot Turret Canvas Backdrop */}
       <div
+        className="game-arena game-arena-typing"
         style={{
           position: 'relative',
           flex: 1,
@@ -569,6 +594,7 @@ export function TypingGame({
           overflow: 'hidden',
         }}
       >
+        {!isPractice && cleared && <PassMilestoneBanner score={score} />}
         <canvas
           ref={bgCanvasRef}
           width={1040}
@@ -584,6 +610,7 @@ export function TypingGame({
           }}
         />
 
+        {combo >= 3 && !prefs.reduceMotion && <div className="typing-fever-aura" aria-hidden="true" />}
         {combo >= 3 && (
           <div
             style={{
@@ -609,7 +636,6 @@ export function TypingGame({
           const leftPct = isPractice ? 25 : 1.5 + slot.lane * 24.5
           const widthPct = isPractice ? 50 : 23
           const nearBottom = progress >= 0.75
-          const typedClean = inputValue.normalize('NFC').trimStart()
           const isPrefixMatch =
             typedClean.length >= 1 && slot.displayKo.startsWith(typedClean)
           const matchedChars = isPrefixMatch ? typedClean.length : 0
@@ -617,6 +643,9 @@ export function TypingGame({
           return (
             <div
               key={slot.slotId}
+              className="typing-phrase"
+              data-slot={slot.slotId}
+              data-wide={slot.lengthClass === 'long' ? (slot.lane < 2 ? 'left' : 'right') : undefined}
               style={{
                 position: 'absolute',
                 top: `${topPct}%`,
@@ -658,6 +687,16 @@ export function TypingGame({
                   slot.displayKo
                 )}
               </div>
+              {isPrefixMatch && (
+                <svg className="typing-deadline-ring" viewBox="0 0 28 28" aria-hidden="true">
+                  <circle cx="14" cy="14" r="10" fill="#101d2b" stroke="#35556c" strokeWidth="3" />
+                  <circle
+                    cx="14" cy="14" r="10" fill="none" stroke={nearBottom ? '#FFBD64' : '#B9F66C'}
+                    strokeWidth="3" pathLength="100" strokeDasharray={`${(1 - progress) * 100} 100`}
+                    transform="rotate(-90 14 14)"
+                  />
+                </svg>
+              )}
               {isPrefixMatch ? (
                 <div style={{ fontSize: 11, color: 'var(--accent-clear)', marginTop: 2 }}>
                   🎯 입력 일치 중 · 완성 후 Enter!
@@ -672,11 +711,13 @@ export function TypingGame({
         })}
 
         {/* Electric Connection Laser Beam on Successful Phrase Submit */}
-        {laserShot && (
+        {laserShot && !prefs.reduceMotion && elapsedMs - laserShot.startedMs < 360 && (
           <svg
             viewBox="0 0 100 100"
+            key={laserShot.startedMs}
             preserveAspectRatio="none"
             aria-hidden="true"
+            className="typing-power-link"
             style={{
               position: 'absolute',
               inset: 0,
@@ -685,13 +726,12 @@ export function TypingGame({
               pointerEvents: 'none',
             }}
           >
-            <line
-              x1="50"
-              y1="96"
-              x2={laserShot.targetX}
-              y2={laserShot.targetY}
+            <path
+              d={`M ${laserShot.targetX} ${laserShot.targetY} L ${(laserShot.targetX + 50) / 2} ${(laserShot.targetY + 96) / 2 - 4} L 50 94`}
               stroke="#B9F66C"
               strokeWidth="0.9"
+              pathLength="1"
+              fill="none"
             />
             <circle cx={laserShot.targetX} cy={laserShot.targetY} r="2.6" fill="#43E7F2" />
           </svg>
@@ -713,6 +753,14 @@ export function TypingGame({
         >
           바닥 도달 기준선 (5개 놓치면 라운드 종료)
         </div>
+        {urgentSlot && urgentSlot.deadlineMs - elapsedMs < 1350 && (
+          <span
+            className="typing-landing-marker"
+            data-wide={urgentSlot.lengthClass === 'long' ? (urgentSlot.lane < 2 ? 'left' : 'right') : undefined}
+            aria-hidden="true"
+            style={{ left: isPractice ? '25%' : `${1.5 + urgentSlot.lane * 24.5}%`, width: isPractice ? '50%' : '23%' }}
+          />
+        )}
 
         {paused && (
           <div
@@ -748,7 +796,7 @@ export function TypingGame({
 
       {/* Feedback + IME-safe Typing Input */}
       <div
-        className={`status-alert ${
+        className={`typing-feedback status-alert ${
           feedback.tone === 'ok' ? 'clear' : feedback.tone === 'retry' ? 'warn' : ''
         }`}
         style={
@@ -760,7 +808,7 @@ export function TypingGame({
         <span>{feedback.text}</span>
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="typing-entry" style={{ display: 'flex', gap: 8 }}>
         <input
           ref={inputRef}
           type="text"
@@ -769,6 +817,7 @@ export function TypingGame({
           disabled={paused || practiceCleared}
           placeholder="여기에 화면의 공식 문구를 그대로 입력하고 Enter를 누르세요"
           aria-label="공식 문구 입력창"
+          enterKeyHint="send"
           onChange={(e) => setInputValue(e.target.value)}
           onCompositionStart={() => {
             isComposingRef.current = true

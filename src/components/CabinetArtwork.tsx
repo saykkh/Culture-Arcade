@@ -17,8 +17,8 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const w = canvas.width
-    const h = canvas.height
+    let w = 640
+    let h = 160
     let rafId = 0
     let lastTs = performance.now()
     let t = 0
@@ -35,16 +35,22 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         ctx.fillStyle = bg
         ctx.fillRect(0, 0, w, h)
 
-        // Cyber city buildings silhouette
-        ctx.fillStyle = 'rgba(22, 43, 68, 0.75)'
-        for (let i = 0; i < 16; i += 1) {
+        // Two layers of city buildings with staggered window lights.
+        ctx.fillStyle = '#11263d'
+        for (let i = 0; i * 34 < w; i += 1) {
+          const bh = 20 + ((i * 37) % 72)
+          ctx.fillRect(i * 34, h - 26 - bh, 28, bh)
+        }
+        for (let i = 0; i * 44 < w; i += 1) {
           const bx = i * 44
           const bh = 28 + ((i * 29) % 48)
+          ctx.fillStyle = '#172f4a'
           ctx.fillRect(bx, h - 26 - bh, 36, bh)
-          ctx.fillStyle = i % 2 === 0 ? 'rgba(67,231,242,0.28)' : 'rgba(185,246,108,0.22)'
-          ctx.fillRect(bx + 6, h - 20 - bh, 8, 5)
-          ctx.fillRect(bx + 20, h - 10 - bh, 8, 5)
-          ctx.fillStyle = 'rgba(22, 43, 68, 0.75)'
+          for (let row = 6; row < bh - 6; row += 9) {
+            ctx.fillStyle = Math.sin(t * 1.3 + i + row) > 0 ? '#2E7087' : '#244861'
+            ctx.fillRect(bx + 6, h - 26 - bh + row, 8, 3)
+            ctx.fillRect(bx + 20, h - 26 - bh + row, 8, 3)
+          }
         }
 
         // Falling matrix rain streaks
@@ -71,7 +77,8 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         words.forEach((wd, idx) => {
           const wy = 18 + ((t * wd.speed + wd.offset) % (h - 68))
           const isTargeted = idx === activeTargetIdx
-          const pw = wd.text.length * 13 + 24
+          ctx.font = '800 13px "Paperlogy", sans-serif'
+          const pw = Math.min(w * 0.23, ctx.measureText(wd.text).width + 24)
           ctx.fillStyle = isTargeted ? 'rgba(20, 48, 40, 0.95)' : 'rgba(13, 25, 42, 0.92)'
           ctx.strokeStyle = isTargeted ? '#B9F66C' : wd.color
           ctx.lineWidth = isTargeted ? 2.4 : 1.5
@@ -81,10 +88,9 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
           ctx.stroke()
 
           ctx.fillStyle = isTargeted ? '#B9F66C' : '#F2F6FB'
-          ctx.font = '800 13px "Paperlogy", sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(wd.text, wd.x, wy)
+          ctx.fillText(wd.text, wd.x, wy, pw - 12)
 
           // Periodic laser beam & spark burst on targeted word!
           if (isTargeted && (t * 1.4) % 1 > 0.55) {
@@ -116,8 +122,13 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
 
         ctx.fillStyle = '#43E7F2'
         ctx.beginPath()
-        ctx.arc(w * 0.5, h - 16, 14, Math.PI, 0)
+        ctx.roundRect(w * 0.5 - 20, h - 37, 40, 24, 8)
         ctx.fill()
+        ctx.fillStyle = '#102238'
+        ctx.fillRect(w * 0.5 - 14, h - 32, 28, 10)
+        ctx.fillStyle = '#B9F66C'
+        ctx.fillRect(w * 0.5 - 10, h - 28, 6, 3)
+        ctx.fillRect(w * 0.5 + 4, h - 28, 6, 3)
       } else if (gameId === 'snake') {
         // 2) Living Circuit-Board Reactor + Articulated Mecha-Dragon + Pulsing Word Orbs
         const bg = ctx.createLinearGradient(0, 0, w, h)
@@ -149,45 +160,85 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
           const py = 28 + (p % 3) * 34
           ctx.fillRect(px, py - 1.5, 16, 3)
         }
+        ctx.strokeStyle = '#38BBC250'
+        for (let x = 20; x < w; x += 86) {
+          const y = h * ((x % 3) * 0.3 + 0.14)
+          ctx.beginPath()
+          ctx.moveTo(x, y)
+          ctx.lineTo(x + 22, y)
+          ctx.lineTo(x + 38, y + 16)
+          ctx.lineTo(x + 61, y + 16)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.arc(x, y, 3, 0, Math.PI * 2)
+          ctx.stroke()
+        }
 
         // Slithering Mecha-Cable Dragon across the wide screen
-        const headX = w * 0.18 + ((t * 90) % (w * 0.56))
-        const headY = h * 0.54 + Math.sin(t * 4.2) * 20
+        const cycle = (t % 5) / 5
+        const headX = w * (0.32 + cycle * 0.52)
+        const headY = h * 0.54 + Math.sin(cycle * Math.PI * 2) * h * 0.17
 
         ctx.save()
         ctx.strokeStyle = '#89E051'
         ctx.shadowColor = '#B9F66C'
         ctx.shadowBlur = 12
+        ctx.globalAlpha = Math.min(1, cycle * 14, (1 - cycle) * 15)
         ctx.lineWidth = 18
         ctx.lineCap = 'round'
         ctx.beginPath()
         for (let seg = 0; seg <= 9; seg += 1) {
           const sx = headX - seg * 16
-          const sy = h * 0.54 + Math.sin(t * 4.2 - seg * 0.45) * 20
+          const sy = h * 0.54 + Math.sin(cycle * Math.PI * 2 - seg * 0.3) * h * 0.17
           if (seg === 0) ctx.moveTo(sx, sy)
           else ctx.lineTo(sx, sy)
         }
         ctx.stroke()
-        ctx.restore()
 
-        // Dragon Head + Glowing Eyes + Antenna
+        ctx.shadowBlur = 0
+        for (let seg = 1; seg <= 9; seg += 1) {
+          const sx = headX - seg * 16
+          const sy = h * 0.54 + Math.sin(cycle * Math.PI * 2 - seg * 0.3) * h * 0.17
+          ctx.fillStyle = seg % 2 ? '#C5FF8B' : '#61DCD7'
+          ctx.beginPath()
+          ctx.arc(sx, sy, 4.5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+
+        // Dragon horns, visor, and jaw
         ctx.fillStyle = '#43E7F2'
+        ctx.beginPath()
+        ctx.moveTo(headX - 10, headY - 6)
+        ctx.lineTo(headX - 20, headY - 21)
+        ctx.lineTo(headX + 4, headY - 10)
+        ctx.fill()
         ctx.beginPath()
         ctx.roundRect(headX - 12, headY - 13, 28, 26, 9)
         ctx.fill()
         ctx.fillStyle = '#061019'
         ctx.beginPath()
         ctx.arc(headX + 8, headY - 5, 3, 0, Math.PI * 2)
-        ctx.arc(headX + 8, headY + 5, 3, 0, Math.PI * 2)
         ctx.fill()
+        ctx.fillRect(headX + 5, headY + 4, 13, cycle > 0.88 ? 5 : 2)
+        ctx.restore()
 
         // Bobbing Holographic Word Capsules ahead
         const orbs = [
           { label: '1. 함께하여', x: w * 0.78, y: h * 0.36, c: '#B9F66C' },
-          { label: '2. 더 큰 가치를', x: w * 0.86, y: h * 0.7, c: '#43E7F2' },
+          { label: '2. 더 큰 가치를', x: w * 0.83, y: h * 0.7, c: '#43E7F2' },
         ]
-        for (const orb of orbs) {
+        orbs.forEach((orb, index) => {
           const oy = orb.y + Math.sin(t * 3.5 + orb.x) * 4
+          if (index === 1 && cycle >= 0.88) {
+            ctx.save()
+            ctx.globalAlpha = (1 - cycle) / 0.12
+            ctx.strokeStyle = orb.c
+            ctx.beginPath()
+            ctx.arc(orb.x - 30, h * 0.49, 12 + (cycle - 0.88) * 190, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.restore()
+            return
+          }
           ctx.strokeStyle = orb.c
           ctx.lineWidth = 2
           ctx.beginPath()
@@ -205,7 +256,7 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText(orb.label, orb.x + 16, oy)
-        }
+        })
       } else if (gameId === 'shooter') {
         // 3) Warp-Speed Starfield + 3 Hovering Drone Shields + Banking Twin-Wing Starfighter
         const bg = ctx.createLinearGradient(0, 0, 0, h)
@@ -214,7 +265,14 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         ctx.fillStyle = bg
         ctx.fillRect(0, 0, w, h)
 
-        // Streaming warp stars
+        const nebulaX = w * (0.5 + Math.sin(t * 0.42) * 0.16)
+        const nebula = ctx.createRadialGradient(nebulaX, h * 0.6, 0, nebulaX, h * 0.6, w * 0.62)
+        nebula.addColorStop(0, '#734CB852')
+        nebula.addColorStop(0.45, '#365EA941')
+        nebula.addColorStop(1, '#0B122900')
+        ctx.fillStyle = nebula
+        ctx.fillRect(0, 0, w, h)
+
         ctx.fillStyle = '#9ADCF8'
         for (let s = 0; s < 28; s += 1) {
           const sx = (s * 59 + 13) % w
@@ -230,21 +288,40 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         ]
 
         targets.forEach((tg) => {
-          const bobY = 34 + Math.sin(t * 3 + tg.x) * 4
+          const bobY = h * 0.23 + Math.sin(t * 3 + tg.x) * 4
+          const podW = Math.min(148, w * 0.25)
           const locked = Math.abs(shipX - tg.x) < 52
           ctx.fillStyle = locked ? '#1a2f48' : '#101a2c'
           ctx.strokeStyle = tg.c
           ctx.lineWidth = locked ? 3 : 1.8
           ctx.beginPath()
-          ctx.roundRect(tg.x - 74, bobY - 18, 148, 38, 10)
+          ctx.roundRect(tg.x - podW / 2, bobY - 18, podW, 38, 10)
           ctx.fill()
           ctx.stroke()
+          ctx.save()
+          ctx.translate(tg.x, bobY)
+          ctx.rotate(Math.sin(t * 1.8 + tg.x) * 0.24)
+          ctx.strokeStyle = `${tg.c}66`
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.ellipse(0, 0, podW * 0.56, 24, 0, Math.PI * 0.2, Math.PI * 0.92)
+          ctx.stroke()
+          ctx.restore()
+          ctx.fillStyle = tg.c
+          for (const side of [-1, 1]) {
+            const thrusterX = tg.x + side * podW * 0.32
+            ctx.beginPath()
+            ctx.moveTo(thrusterX - 3, bobY + 19)
+            ctx.lineTo(thrusterX, bobY + 24 + Math.sin(t * 18 + side) * 3)
+            ctx.lineTo(thrusterX + 3, bobY + 19)
+            ctx.fill()
+          }
 
           ctx.fillStyle = locked ? tg.c : '#F2F6FB'
           ctx.font = '800 13.5px "Paperlogy", sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillText(tg.label, tg.x, bobY + 1)
+          ctx.fillText(tg.label, tg.x, bobY + 1, podW - 12)
 
           if (locked && (t * 3) % 1 > 0.45) {
             ctx.save()
@@ -275,10 +352,16 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         ctx.beginPath()
         ctx.moveTo(0, -18)
         ctx.lineTo(-24, 10)
+        ctx.lineTo(-22, -1)
         ctx.lineTo(-7, 6)
         ctx.lineTo(7, 6)
+        ctx.lineTo(22, -1)
         ctx.lineTo(24, 10)
         ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = '#123456'
+        ctx.beginPath()
+        ctx.ellipse(0, -1, 4, 8, 0, 0, Math.PI * 2)
         ctx.fill()
         ctx.restore()
       } else if (gameId === 'runner') {
@@ -305,6 +388,11 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
           ctx.strokeRect(leftX, hz - bh, 22, bh)
           ctx.fillRect(rightX, hz - bh, 22, bh)
           ctx.strokeRect(rightX, hz - bh, 22, bh)
+          ctx.fillStyle = b % 2 === 0 ? '#26607A' : '#593656'
+          for (let row = 6; row < bh; row += 9) {
+            ctx.fillRect(leftX + 5, hz - bh + row, 12, 2)
+            ctx.fillRect(rightX + 5, hz - bh + row, 12, 2)
+          }
         }
 
         // 3D Perspective Highway
@@ -340,32 +428,39 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
           ctx.stroke()
         }
 
-        // Approaching Hyper Ring & Core Pad & Banana
+        // The obstacle reaches the runner first, followed by the hyper ring.
+        const obstacle = (t * 0.6 + 0.38) % 1
+        const ring = (t * 0.6 + 0.02) % 1
+        const runnerX = w * 0.5
+        const laneDepth = (progress: number) => hz + progress * (h - hz - 5)
+
+        const gantryDepth = (t * 0.55) % 1
+        const gantryY = laneDepth(gantryDepth)
+        const gantryHalf = w * (0.1 + gantryDepth * 0.28)
+        const gantryHeight = 12 + gantryDepth * 55
+        ctx.strokeStyle = 'rgba(67, 231, 242, 0.55)'
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(runnerX - gantryHalf, gantryY)
+        ctx.lineTo(runnerX - gantryHalf * 0.85, gantryY - gantryHeight)
+        ctx.lineTo(runnerX + gantryHalf * 0.85, gantryY - gantryHeight)
+        ctx.lineTo(runnerX + gantryHalf, gantryY)
+        ctx.stroke()
+
         ctx.strokeStyle = '#FF6B9E'
         ctx.lineWidth = 4
         ctx.beginPath()
-        ctx.arc(w * 0.35, hz + 34, 16, 0, Math.PI * 2)
+        ctx.ellipse(runnerX, laneDepth(ring) - 9, 7 + ring * 31, 8 + ring * 30, 0, 0, Math.PI * 2)
         ctx.stroke()
 
-        ctx.fillStyle = '#132c24'
-        ctx.strokeStyle = '#B9F66C'
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.roundRect(w * 0.5 - 46, hz + 38, 92, 22, 6)
-        ctx.fill()
-        ctx.stroke()
-        ctx.fillStyle = '#B9F66C'
-        ctx.font = '800 12px "Paperlogy", sans-serif'
         ctx.textAlign = 'center'
-        ctx.fillText('⚡[C] 부스터', w * 0.5, hz + 53)
-
         ctx.fillStyle = '#FFE047'
-        ctx.font = '800 13px "Paperlogy", sans-serif'
-        ctx.fillText('🍌바나나', w * 0.68, hz + 64)
+        ctx.font = `${Math.round(8 + obstacle * 17)}px "Paperlogy", sans-serif`
+        ctx.fillText('🍌', runnerX, laneDepth(obstacle))
 
         // Caped Hoverboard Runner hopping dynamically!
-        const runnerX = w * (0.5 + Math.sin(t * 2.4) * 0.14)
-        const jumpOffset = Math.abs(Math.sin(t * 3.6)) * 18
+        const jumpProgress = Math.max(0, (obstacle - 0.45) / 0.55)
+        const jumpOffset = Math.sin(jumpProgress * Math.PI) * 27
         const ry = h - 22 - jumpOffset
 
         // Flowing Neon Cape
@@ -379,6 +474,12 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         ctx.fill()
 
         // Hoverboard + Helmet
+        ctx.fillStyle = '#721E62'
+        ctx.beginPath()
+        ctx.moveTo(runnerX - 11, ry + 9)
+        ctx.lineTo(runnerX, ry + 16 + Math.sin(t * 19) * 3)
+        ctx.lineTo(runnerX + 11, ry + 9)
+        ctx.fill()
         ctx.fillStyle = '#43E7F2'
         ctx.beginPath()
         ctx.ellipse(runnerX, ry + 8, 18, 5, 0, 0, Math.PI * 2)
@@ -387,16 +488,27 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
         ctx.beginPath()
         ctx.arc(runnerX, ry - 24, 9, 0, Math.PI * 2)
         ctx.fill()
+        ctx.fillStyle = '#182748'
+        ctx.beginPath()
+        ctx.roundRect(runnerX - 7, ry - 28, 14, 6, 3)
+        ctx.fill()
       }
     }
 
-    if (prefs.reduceMotion) {
-      drawScene(0.4)
-      return
+    const syncSize = () => {
+      const { width, height } = canvas.getBoundingClientRect()
+      if (!width || !height) return
+      const density = Math.min(window.devicePixelRatio, 2)
+      canvas.width = Math.round(width * density)
+      canvas.height = Math.round(height * density)
+      w = Math.max(480, Math.round(160 * (width / height)))
+      h = Math.max(160, Math.min(420, Math.round(w * (height / width))))
+      ctx.setTransform(canvas.width / w, 0, 0, canvas.height / h, 0, 0)
+      drawScene(0)
     }
 
     const loop = (now: number) => {
-      const dt = Math.min(0.06, Math.max(0, (now - lastTs) / 1000))
+      const dt = Math.min(0.05, (now - lastTs) / 1000)
       lastTs = now
       if (!document.hidden) {
         drawScene(dt)
@@ -404,20 +516,26 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
       rafId = window.requestAnimationFrame(loop)
     }
 
-    rafId = window.requestAnimationFrame(loop)
-    return () => window.cancelAnimationFrame(rafId)
+    t = 0.55
+    syncSize()
+    const resizeObserver = new ResizeObserver(syncSize)
+    resizeObserver.observe(canvas)
+    if (!prefs.reduceMotion) rafId = window.requestAnimationFrame(loop)
+    return () => {
+      window.cancelAnimationFrame(rafId)
+      resizeObserver.disconnect()
+    }
   }, [gameId, prefs.reduceMotion])
 
   return (
     <canvas
       ref={canvasRef}
-      width={640}
-      height={160}
       aria-hidden="true"
       style={{
+        position: 'absolute',
+        inset: 0,
         width: '100%',
         height: '100%',
-        objectFit: 'cover',
         display: 'block',
       }}
     />

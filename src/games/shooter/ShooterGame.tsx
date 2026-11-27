@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildShooterRound, getContentBundle } from '../../../content'
 import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
+import { MobileGameHud } from '../../components/MobileGameHud'
+import { useCompactGameLayout } from '../../lib/gameLayout'
 import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules'
 import type { CoreValueCode, GameMode, RunEndReason, ShooterRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -22,6 +24,7 @@ export interface ShooterGameProps {
 }
 
 type QuestionPhase = 'aiming' | 'celebrate' | 'feedback'
+const SHOT_COLORS = { correct: '#B9F66C', wrong: '#FF6B7A', miss: '#FFBD64' } as const
 
 const CORE_ACCENTS: Record<CoreValueCode, string> = {
   C: '#43E7F2',
@@ -34,7 +37,13 @@ function getQuestionInstruction(promptKind: 'ko_name' | 'en_name' | 'description
   if (promptKind === 'en_name') {
     return '아래 영문 명칭이 뜻하는 LS전선 핵심가치(C·O·R·E) 표적을 맞히세요!'
   }
+  if (promptKind === 'ko_name') return '아래 핵심가치의 영문 명칭을 맞히세요!'
   return '아래 설명이 뜻하는 LS전선 핵심가치(C·O·R·E) 표적을 맞히세요!'
+}
+
+function getTargetLabel(option: { labelKo: string; labelEn: string }, promptKind: 'ko_name' | 'en_name' | 'description') {
+  if (promptKind === 'ko_name') return option.labelEn
+  return option.labelKo.replace(/\s*\([^)]*[A-Za-z][^)]*\)\s*$/u, '')
 }
 
 /**
@@ -53,6 +62,7 @@ export function ShooterGame({
   onFinishRound,
 }: ShooterGameProps) {
   const { prefs } = useArcadePreferences()
+  const compactLayout = useCompactGameLayout()
   const bundle = useMemo(() => getContentBundle(contentVersion), [contentVersion])
   const roundItems = useMemo(() => {
     const full = buildShooterRound(bundle, seed)
@@ -65,22 +75,25 @@ export function ShooterGame({
   const [questionIdx, setQuestionIdx] = useState(0)
   const [phase, setPhase] = useState<QuestionPhase>('aiming')
   const [aimElapsedMs, setAimElapsedMs] = useState(0)
-  const [practiceElapsedMs, setPracticeElapsedMs] = useState(0)
+  const [activeElapsedMs, setActiveElapsedMs] = useState(0)
   const [tabPaused, setTabPaused] = useState(false)
   const [shipX, setShipX] = useState(0.5)
   const [correctCount, setCorrectCount] = useState(0)
   const [practiceCleared, setPracticeCleared] = useState(false)
   const [missNotice, setMissNotice] = useState<string | null>(null)
-  const [laserBeam, setLaserBeam] = useState<{ x: number; hit: boolean } | null>(null)
+  const [laserBeam, setLaserBeam] = useState<{ x: number; outcome: keyof typeof SHOT_COLORS; startedMs: number } | null>(null)
   const [celebrateBurst, setCelebrateBurst] = useState<{
     lane: 0 | 1 | 2
     labelKo: string
+    startedMs: number
   } | null>(null)
 
   const [feedbackData, setFeedbackData] = useState<{
     outcome: 'correct' | 'wrong' | 'timeout'
     chosenLabel: string | null
+    chosenExplanation?: string
     correctLabel: string
+    correctEnglish: string
     correctExplanation: string
   } | null>(null)
 
@@ -177,6 +190,7 @@ export function ShooterGame({
           outcome: 'timeout',
           chosenLabel: null,
           correctLabel: correctRec.display_ko,
+          correctEnglish: correctRec.display_en,
           correctExplanation: current.item.explanation,
         })
         phaseRef.current = 'feedback'
@@ -219,6 +233,7 @@ export function ShooterGame({
         setCelebrateBurst({
           lane: selectedLane,
           labelKo: chosenRec.display_ko,
+          startedMs: totalActiveMsRef.current,
         })
         phaseRef.current = 'celebrate'
         setPhase('celebrate')
@@ -227,7 +242,9 @@ export function ShooterGame({
         setFeedbackData({
           outcome: 'wrong',
           chosenLabel: chosenRec.display_ko,
+          chosenExplanation: chosenRec.explanation,
           correctLabel: correctRec.display_ko,
+          correctEnglish: correctRec.display_en,
           correctExplanation: current.item.explanation,
         })
         phaseRef.current = 'feedback'
@@ -250,12 +267,12 @@ export function ShooterGame({
       if (finishedRef.current || phaseRef.current !== 'aiming' || practiceCleared) return
       ensureAimStartedForCurrent()
       const hitLane = findHitTargetLane(xPos)
-      setLaserBeam({ x: xPos, hit: hitLane !== null })
-      window.setTimeout(() => setLaserBeam(null), 200)
+      const current = roundItems[questionIdxRef.current]!
+      const outcome = hitLane === null ? 'miss' : hitLane === current.correctLane ? 'correct' : 'wrong'
+      setLaserBeam({ x: xPos, outcome, startedMs: totalActiveMsRef.current })
 
       if (hitLane === null) {
         playArcadeSfx('select')
-        const current = roundItems[questionIdxRef.current]!
         if (!isPractice) {
           seqRef.current += 1
           eventsRef.current.push({
@@ -318,12 +335,12 @@ export function ShooterGame({
     ensureAimStartedForCurrent()
   }, [ensureAimStartedForCurrent, finishOnce, roundItems.length])
 
-  // Auto-advance smoothly 720ms after a correct hit without blocking the screen with a modal!
+  // Let the player see the Korean and English names before continuing.
   useEffect(() => {
     if (phase !== 'celebrate') return
     const timer = window.setTimeout(() => {
       goNextQuestion()
-    }, 720)
+    }, 920)
     return () => window.clearTimeout(timer)
   }, [goNextQuestion, phase])
 
@@ -348,6 +365,7 @@ export function ShooterGame({
           snapAndFireLane(lane)
         }
       } else if (e.key === ' ' || e.key === 'Enter') {
+        if (phaseRef.current === 'aiming' && e.target instanceof HTMLButtonElement) return
         e.preventDefault()
         e.stopPropagation()
         if (e.repeat) return
@@ -391,8 +409,8 @@ export function ShooterGame({
       lastTs = nowTs
 
       totalActiveMsRef.current += dt
+      if (isPractice || !prefs.reduceMotion) setActiveElapsedMs(totalActiveMsRef.current)
       if (isPractice) {
-        setPracticeElapsedMs(totalActiveMsRef.current)
         if (totalActiveMsRef.current >= 30_000) {
           finishOnce('time_up')
           return
@@ -417,7 +435,6 @@ export function ShooterGame({
         setAimElapsedMs(nextAim)
         if (nextAim >= aimLimitMs) {
           finalizeCurrentQuestion(null)
-          return
         }
       }
 
@@ -433,6 +450,7 @@ export function ShooterGame({
     isPractice,
     maxActiveRoundMs,
     practiceCleared,
+    prefs.reduceMotion,
     tabPaused,
   ])
 
@@ -445,7 +463,9 @@ export function ShooterGame({
 
     const w = canvas.width
     const h = canvas.height
-    const tSec = (aimElapsedMs + practiceElapsedMs + questionIdx * 2300) / 1000
+    const tSec = prefs.reduceMotion ? 0 : activeElapsedMs / 1000
+    const shotAge = laserBeam ? Math.max(0, activeElapsedMs - laserBeam.startedMs) : Infinity
+    const shotFade = Math.max(0, 1 - shotAge / 200)
     const isClearedBonusMode = !isPractice && correctCount * BASE_ACTION_POINTS >= PASSING_SCORE
 
     // Deep Galactic Nebula Backdrop
@@ -456,14 +476,15 @@ export function ShooterGame({
     ctx.fillStyle = bgGrad
     ctx.fillRect(0, 0, w, h)
 
-    // Glowing Nebula Clouds
-    const neb1 = ctx.createRadialGradient(w * 0.25, h * 0.35, 10, w * 0.25, h * 0.35, 240)
+    const neb1X = w * (0.25 + Math.sin(tSec * 0.24) * 0.11)
+    const neb1 = ctx.createRadialGradient(neb1X, h * 0.35, 10, neb1X, h * 0.35, 240)
     neb1.addColorStop(0, 'rgba(67, 231, 242, 0.14)')
     neb1.addColorStop(1, 'rgba(4, 8, 20, 0)')
     ctx.fillStyle = neb1
     ctx.fillRect(0, 0, w, h)
 
-    const neb2 = ctx.createRadialGradient(w * 0.78, h * 0.45, 10, w * 0.78, h * 0.45, 220)
+    const neb2X = w * (0.78 + Math.cos(tSec * 0.18) * 0.11)
+    const neb2 = ctx.createRadialGradient(neb2X, h * 0.45, 10, neb2X, h * 0.45, 220)
     neb2.addColorStop(0, 'rgba(255, 107, 158, 0.12)')
     neb2.addColorStop(1, 'rgba(4, 8, 20, 0)')
     ctx.fillStyle = neb2
@@ -487,8 +508,8 @@ export function ShooterGame({
 
     // Subtle Camera Shake on Laser Hit!
     ctx.save()
-    if (laserBeam?.hit && !prefs.reduceMotion) {
-      ctx.translate(Math.sin(tSec * 90) * 3, Math.cos(tSec * 80) * 3)
+    if (laserBeam && laserBeam.outcome !== 'miss' && !prefs.reduceMotion && shotFade > 0) {
+      ctx.translate(Math.sin(tSec * 90) * 3 * shotFade, Math.cos(tSec * 80) * 3 * shotFade)
     }
 
     // Vertical laser sight line BEFORE targets so it connects ship to shield
@@ -508,7 +529,7 @@ export function ShooterGame({
       const x0 = box.minX * w
       const podW = (box.maxX - box.minX) * w
       const bobY = prefs.reduceMotion ? 0 : Math.sin(tSec * 3.2 + box.lane * 1.6) * 4.5
-      const podY = 18 + bobY
+      const podY = 18
       const podH = 120
       const centerX = box.centerX * w
       const isLocked = activeHoverLane === box.lane
@@ -519,10 +540,10 @@ export function ShooterGame({
         ctx.fillStyle = `${accent}88`
         ctx.beginPath()
         ctx.moveTo(x0 + 22, podY + podH)
-        ctx.lineTo(x0 + 28, podY + podH + 10 + Math.sin(tSec * 18 + box.lane) * 3)
+        ctx.lineTo(x0 + 28, podY + podH + 11 + bobY)
         ctx.lineTo(x0 + 34, podY + podH)
         ctx.moveTo(x0 + podW - 34, podY + podH)
-        ctx.lineTo(x0 + podW - 28, podY + podH + 10 + Math.cos(tSec * 18 + box.lane) * 3)
+        ctx.lineTo(x0 + podW - 28, podY + podH + 11 - bobY)
         ctx.lineTo(x0 + podW - 22, podY + podH)
         ctx.fill()
       }
@@ -561,12 +582,14 @@ export function ShooterGame({
       // Core Value Letter + Korean Name
       ctx.fillStyle = isLocked ? accent : '#F2F6FB'
       ctx.font = '800 20px "Paperlogy", sans-serif'
-      ctx.fillText(opt.labelKo, centerX, podY + 62)
+      ctx.fillText(getTargetLabel(opt, currentScheduled.item.promptKind), centerX, podY + 62, podW - 16)
 
-      // English Subtitle
-      ctx.fillStyle = '#9FB0C7'
-      ctx.font = '600 13px "Paperlogy", sans-serif'
-      ctx.fillText(opt.labelEn, centerX, podY + 92)
+      // Offer translations in the explanation once the choice has been made.
+      if (currentScheduled.item.promptKind === 'description') {
+        ctx.fillStyle = '#9FB0C7'
+        ctx.font = '600 13px "Paperlogy", sans-serif'
+        ctx.fillText(opt.labelEn, centerX, podY + 92, podW - 16)
+      }
 
       // Bottom Bullseye Connector Node
       ctx.fillStyle = isLocked ? '#B9F66C' : accent
@@ -586,10 +609,13 @@ export function ShooterGame({
         ctx.stroke()
 
         if (!prefs.reduceMotion) {
+          const progress = Math.min(1, Math.max(0, (activeElapsedMs - celebrateBurst.startedMs) / 420))
+          ctx.save()
+          ctx.globalAlpha = 1 - progress
           ctx.strokeStyle = 'rgba(67, 231, 242, 0.8)'
           ctx.lineWidth = 3
           ctx.beginPath()
-          ctx.arc(centerX, podY + 62, 54, 0, Math.PI * 2)
+          ctx.arc(centerX, podY + 62, 36 + progress * 70, 0, Math.PI * 2)
           ctx.stroke()
 
           for (let r = 0; r < 12; r += 1) {
@@ -597,10 +623,12 @@ export function ShooterGame({
             ctx.strokeStyle = r % 2 === 0 ? '#B9F66C' : '#43E7F2'
             ctx.lineWidth = 3
             ctx.beginPath()
-            ctx.moveTo(centerX + Math.cos(ang) * 28, podY + 62 + Math.sin(ang) * 20)
-            ctx.lineTo(centerX + Math.cos(ang) * 72, podY + 62 + Math.sin(ang) * 52)
+            const radius = 30 + progress * 65
+            ctx.moveTo(centerX + Math.cos(ang) * radius, podY + 62 + Math.sin(ang) * radius)
+            ctx.lineTo(centerX + Math.cos(ang) * (radius + 22), podY + 62 + Math.sin(ang) * (radius + 22))
             ctx.stroke()
           }
+          ctx.restore()
         }
 
         ctx.font = '900 24px "Paperlogy", sans-serif'
@@ -614,18 +642,21 @@ export function ShooterGame({
     }
 
     // Fired Laser Beam + Muzzle Flash (+ Twin Wingman Lasers when cleared!)
-    if (laserBeam && !prefs.reduceMotion) {
+    if (laserBeam && !prefs.reduceMotion && shotFade > 0) {
       ctx.save()
-      ctx.strokeStyle = laserBeam.hit ? '#B9F66C' : '#FFBD64'
-      ctx.shadowColor = laserBeam.hit ? '#B9F66C' : '#FFBD64'
+      ctx.globalAlpha = shotFade
+      const shotColor = SHOT_COLORS[laserBeam.outcome]
+      ctx.strokeStyle = shotColor
+      ctx.shadowColor = shotColor
       ctx.shadowBlur = 20
       ctx.lineWidth = 7
+      if (laserBeam.outcome === 'miss') ctx.setLineDash([12, 9])
       ctx.beginPath()
       ctx.moveTo(laserBeam.x * w, shipPy - 22)
-      ctx.lineTo(laserBeam.x * w, laserBeam.hit ? 140 : 12)
+      ctx.lineTo(laserBeam.x * w, laserBeam.outcome === 'miss' ? 12 : 140)
       ctx.stroke()
 
-      if (isClearedBonusMode && laserBeam.hit) {
+      if (isClearedBonusMode && laserBeam.outcome === 'correct') {
         ctx.lineWidth = 3
         ctx.strokeStyle = '#43E7F2'
         ctx.beginPath()
@@ -641,6 +672,16 @@ export function ShooterGame({
       ctx.beginPath()
       ctx.arc(laserBeam.x * w, shipPy - 22, 9, 0, Math.PI * 2)
       ctx.fill()
+      if (laserBeam.outcome === 'wrong') {
+        const x = laserBeam.x * w
+        ctx.lineWidth = 4
+        ctx.beginPath()
+        ctx.moveTo(x - 10, 130)
+        ctx.lineTo(x + 10, 150)
+        ctx.moveTo(x + 10, 130)
+        ctx.lineTo(x - 10, 150)
+        ctx.stroke()
+      }
       ctx.restore()
     }
 
@@ -711,15 +752,14 @@ export function ShooterGame({
 
     ctx.restore()
   }, [
-    aimElapsedMs,
+    activeElapsedMs,
     celebrateBurst,
+    compactLayout,
     correctCount,
     currentScheduled,
     isPractice,
     laserBeam,
-    practiceElapsedMs,
     prefs.reduceMotion,
-    questionIdx,
     shipX,
   ])
 
@@ -732,16 +772,15 @@ export function ShooterGame({
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
       {/* Top HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0 }}>
+        <MobileGameHud remaining={isPractice ? `${Math.max(0, Math.ceil((30_000 - activeElapsedMs) / 1000))}s` : `${aimRemainingSec}s`} score={score} practice={isPractice} practiceCleared={practiceCleared} />
         <div className="hud-metric">
           <CoreBotMascot
             mood={
-              cleared
-                ? 'crown'
+              feedbackData || missNotice
+                ? 'danger'
                 : phase === 'celebrate'
-                  ? 'fever'
-                  : feedbackData
-                    ? 'danger'
-                    : 'cheer'
+                  ? cleared ? 'victory' : 'fever'
+                  : 'idle'
             }
             size={36}
           />
@@ -770,7 +809,7 @@ export function ShooterGame({
             }}
           >
             {isPractice
-              ? `${Math.max(0, Math.ceil((30_000 - practiceElapsedMs) / 1000))}s`
+              ? `${Math.max(0, Math.ceil((30_000 - activeElapsedMs) / 1000))}s`
               : `${aimRemainingSec}s`}
           </span>
         </div>
@@ -787,10 +826,9 @@ export function ShooterGame({
         </div>
       </div>
 
-      {!isPractice && <PassMilestoneBanner cleared={cleared} score={score} />}
-
       {/* Prominent High-Visibility Question Banner */}
       <section
+        className="shooter-question"
         aria-label="현재 출제 문제"
         style={{
           padding: '14px 18px 12px',
@@ -827,7 +865,7 @@ export function ShooterGame({
               {getQuestionInstruction(currentScheduled.item.promptKind)}
             </span>
           </div>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <span className="shooter-key-hint" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             표적 클릭 · 숫자키 1·2·3 · ←→ + Space 발사
           </span>
         </div>
@@ -874,6 +912,8 @@ export function ShooterGame({
 
       {/* Unified Shooter Canvas + Feedback Overlay */}
       <div
+        className="game-arena game-arena-shooter"
+        data-feedback={Boolean(feedbackData)}
         style={{
           position: 'relative',
           flex: 1,
@@ -886,9 +926,10 @@ export function ShooterGame({
           flexDirection: 'column',
         }}
       >
+        {!isPractice && cleared && <PassMilestoneBanner score={score} />}
         <canvas
           ref={canvasRef}
-          width={1040}
+          width={compactLayout ? 720 : 1040}
           height={330}
           onMouseMove={(e) => {
             if (phase !== 'aiming' || tabPaused || practiceCleared) return
@@ -923,6 +964,12 @@ export function ShooterGame({
           }}
           aria-label="가치 표적 슈팅 화면 (1, 2, 3번 표적 클릭 또는 방향키와 Space로 발사)"
         />
+        {phase === 'celebrate' && (
+          <div className="shooter-correct-caption">
+            {currentScheduled.options[currentScheduled.correctLane].labelKo}
+            <span> · {currentScheduled.options[currentScheduled.correctLane].labelEn}</span>
+          </div>
+        )}
 
         {isPractice && practiceCleared && (
           <div
@@ -950,6 +997,7 @@ export function ShooterGame({
         {phase === 'feedback' && feedbackData && (
           <div
             role="dialog"
+            className="game-feedback-panel"
             aria-label="문항 정오답 해설"
             onClick={goNextQuestion}
             style={{
@@ -986,11 +1034,16 @@ export function ShooterGame({
               </div>
 
               <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent-clear)', marginBottom: 6 }}>
-                정답: {feedbackData.correctLabel}
+                정답: {feedbackData.correctLabel} · {feedbackData.correctEnglish}
               </div>
               <p className="instruction-text" style={{ margin: '0 0 16px', fontSize: 15 }}>
                 {feedbackData.correctExplanation}
               </p>
+              {feedbackData.chosenExplanation && (
+                <p className="shooter-choice-explanation">
+                  선택한 가치의 뜻 · {feedbackData.chosenExplanation}
+                </p>
+              )}
 
               <button
                 type="button"
@@ -1034,6 +1087,7 @@ export function ShooterGame({
 
       {/* Quick Target Trigger Buttons + Status Tip */}
       <div
+        className="game-touch-controls shooter-target-buttons"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
@@ -1051,7 +1105,7 @@ export function ShooterGame({
           >
             <span>
               <strong style={{ color: 'var(--accent-select)' }}>{opt.lane + 1}번 발사</strong> ·{' '}
-              {opt.labelKo}
+              {getTargetLabel(opt, currentScheduled.item.promptKind)}
             </span>
             <span className="mono-num" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               [{opt.lane + 1}]

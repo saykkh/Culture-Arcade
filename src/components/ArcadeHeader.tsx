@@ -79,6 +79,7 @@ export function ArcadeHeader({
                 )}
                 <button
                   type="button"
+                  data-cable-socket={gid}
                   onClick={() => {
                     playArcadeSfx('select')
                     onNavigate(`/games/${gid}`)
@@ -134,6 +135,7 @@ export function ArcadeHeader({
             type="button"
             className="header-mini-toggle"
             onClick={toggleReduceMotion}
+            aria-label="효과 줄이기"
             aria-pressed={prefs.reduceMotion}
             title="배경 애니메이션 및 번쩍임 줄이기"
           >

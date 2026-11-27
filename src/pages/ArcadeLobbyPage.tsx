@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { ArcadeHeader } from '../components/ArcadeHeader'
 import { ArcadeVideoBackdrop } from '../components/ArcadeVideoBackdrop'
 import { CabinetArtwork } from '../components/CabinetArtwork'
@@ -106,6 +106,7 @@ export function ArcadeLobbyPage({
   onNavigate,
   onLogout,
 }: ArcadeLobbyPageProps) {
+  const { prefs } = useArcadePreferences()
   const initialFocus: GameId = me.recommendation.targetGameId ?? 'typing'
   const [selectedIndex, setSelectedIndex] = useState(() => {
     const idx = ALL_GAME_IDS.indexOf(initialFocus)
@@ -123,44 +124,27 @@ export function ArcadeLobbyPage({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-
       if (e.key === 'Escape' && showBadgeModal) {
         e.preventDefault()
         setShowBadgeModal(false)
-        return
-      }
-
-      if (showBadgeModal) return
-
-      if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        playArcadeSfx('select')
-        setSelectedIndex((prev) => (prev + 1) % ALL_GAME_IDS.length)
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        playArcadeSfx('select')
-        setSelectedIndex((prev) => (prev - 1 + ALL_GAME_IDS.length) % ALL_GAME_IDS.length)
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        playArcadeSfx('select')
-        setSelectedIndex((prev) => (prev + 2) % ALL_GAME_IDS.length)
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        playArcadeSfx('select')
-        setSelectedIndex((prev) => (prev - 2 + ALL_GAME_IDS.length) % ALL_GAME_IDS.length)
-      } else if (e.key === 'Enter' && tag !== 'BUTTON') {
-        e.preventDefault()
-        const targetId = ALL_GAME_IDS[selectedIndex]!
-        playArcadeSfx('start')
-        onNavigate(`/games/${targetId}`)
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedIndex, onNavigate, showBadgeModal])
+  }, [showBadgeModal])
+
+  const moveCabinetFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const columns = getComputedStyle(event.currentTarget).gridTemplateColumns.split(' ').length
+    const offset = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: columns, ArrowUp: -columns }[event.key]
+    if (offset === undefined || showBadgeModal) return
+    event.preventDefault()
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('.cabinet-entry-button')]
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    if (current === -1) return
+    playArcadeSfx('select')
+    buttons[(current + offset + buttons.length) % buttons.length]?.focus()
+  }
 
   const selectedGameId = ALL_GAME_IDS[selectedIndex]!
   const selectedMeta = GAME_CATALOG[selectedGameId]
@@ -192,7 +176,7 @@ export function ArcadeLobbyPage({
   }
 
   return (
-    <div className="arcade-shell has-backdrop" style={{ position: 'relative', overflow: 'hidden' }}>
+    <div className="arcade-shell has-backdrop" data-motion={prefs.reduceMotion ? 'reduced' : undefined} style={{ position: 'relative', overflow: 'hidden' }}>
       <ArcadeVideoBackdrop intensity="vivid" />
 
       <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
@@ -236,8 +220,8 @@ export function ArcadeLobbyPage({
         <section
           className="lobby-status-bar"
           style={{
-            background: 'rgba(24, 33, 48, 0.86)',
-            backdropFilter: 'blur(12px)',
+            background: 'rgba(17, 27, 43, 0.7)',
+            backdropFilter: 'blur(5px)',
             borderColor: me.badgeEarned ? 'rgba(185, 246, 108, 0.5)' : 'rgba(67, 231, 242, 0.25)',
           }}
           aria-label="개인 진도 및 다음 행동 안내"
@@ -248,17 +232,13 @@ export function ArcadeLobbyPage({
                 me.badgeEarned
                   ? 'crown'
                   : me.requiredClearedCount >= 2
-                    ? 'fever'
-                    : 'cheer'
+                    ? 'cheer'
+                    : 'idle'
               }
               size={48}
+              speech={me.recommendation.headline}
             />
-            <div>
-              <span className="lobby-rec-headline">{me.recommendation.headline}</span>
-              <span className="lobby-rec-subline" style={{ marginLeft: 10 }}>
-                {me.recommendation.subline}
-              </span>
-            </div>
+            <span className="lobby-rec-subline">{me.recommendation.subline}</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
@@ -312,7 +292,7 @@ export function ArcadeLobbyPage({
         </section>
 
         {/* 2x2 Illuminated Arcade Bezel Cabinet Grid */}
-        <main className="lobby-grid" aria-label="4종 오락기 선택 (방향키 이동, 클릭 또는 Enter 입장)">
+        <main className="lobby-grid" aria-label="4종 오락기 선택 (방향키 이동, 클릭 또는 Enter 입장)" onKeyDown={moveCabinetFocus}>
           {ALL_GAME_IDS.map((gid, index) => {
             const meta = GAME_CATALOG[gid]
             const prog = me.games.find((g) => g.gameId === gid)
@@ -326,49 +306,12 @@ export function ArcadeLobbyPage({
             const bestScore = Math.max(prog?.standardBestScore ?? 0, prog?.assistedBestScore ?? 0)
 
             return (
-              <div
+              <article
                 key={gid}
-                role="button"
-                tabIndex={0}
-                aria-pressed={isSelected}
                 className={`cabinet-card ${isSelected ? 'selected' : ''} ${
                   isCleared ? 'cleared-cabinet' : ''
                 }`}
-                style={{
-                  background: isSelected
-                    ? `linear-gradient(180deg, rgba(25, 37, 56, 0.95) 0%, rgba(15, 22, 35, 0.96) 100%)`
-                    : `linear-gradient(180deg, rgba(22, 30, 44, 0.88) 0%, rgba(14, 20, 31, 0.92) 100%)`,
-                  borderColor: isSelected
-                    ? meta.accentColor
-                    : isCleared
-                      ? 'rgba(185, 246, 108, 0.55)'
-                      : 'rgba(242, 246, 251, 0.15)',
-                  boxShadow: isSelected
-                    ? `0 0 24px ${meta.accentColor}38, inset 0 0 18px ${meta.accentColor}14`
-                    : undefined,
-                  padding: '13px 16px',
-                }}
-                onClick={() => {
-                  if (isSelected) {
-                    playArcadeSfx('start')
-                    onNavigate(`/games/${gid}`)
-                  } else {
-                    playArcadeSfx('select')
-                    setSelectedIndex(index)
-                  }
-                }}
-                onDoubleClick={() => {
-                  playArcadeSfx('start')
-                  onNavigate(`/games/${gid}`)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    playArcadeSfx('start')
-                    onNavigate(`/games/${gid}`)
-                  }
-                }}
+                style={{ '--cabinet-accent': meta.accentColor } as CSSProperties}
               >
                 {/* Cabinet Marquee Header */}
                 <div className="cabinet-top-row">
@@ -413,23 +356,16 @@ export function ArcadeLobbyPage({
                   </div>
                 </div>
 
-                {/* Full-Bleed Live 60fps Demo Monitor Artwork (Zero black side margins!) */}
-                <div
-                  className="cabinet-scene-preview crt-scanline-frame"
-                  style={{
-                    flex: 1,
-                    minHeight: 138,
-                    margin: '8px 0',
-                    borderColor: `${meta.accentColor}66`,
-                    boxShadow: `inset 0 0 22px rgba(0, 0, 0, 0.55), 0 0 14px ${meta.accentColor}1f`,
-                  }}
-                >
+                <div className="cabinet-scene-preview crt-scanline-frame">
                   <CabinetArtwork gameId={gid} />
+                  <div className="cabinet-monitor-guide" aria-hidden="true">
+                    <CoreBotMascot mood="cheer" size={44} accentColor={meta.accentColor} />
+                  </div>
                 </div>
 
                 {/* Cabinet Title, Tagline, Personal Best & Start Trigger */}
                 <div style={{ display: 'grid', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                  <div className="cabinet-title-row">
                     <span style={{ fontSize: 19, fontWeight: 800, color: '#ffffff' }}>
                       {meta.title}
                     </span>
@@ -446,10 +382,12 @@ export function ArcadeLobbyPage({
                     </span>
                     <button
                       type="button"
-                      className={`btn-arcade btn-compact ${isSelected ? 'btn-start' : ''}`}
+                      className={`cabinet-entry-button btn-arcade btn-compact ${isSelected ? 'btn-start' : ''}`}
+                      tabIndex={isSelected ? 0 : -1}
+                      aria-label={`${meta.title} ${isCleared ? '기록 경신' : '시작'}`}
+                      onFocus={() => setSelectedIndex(index)}
                       style={{ flexShrink: 0, padding: '6px 13px' }}
-                      onClick={(e) => {
-                        e.stopPropagation()
+                      onClick={() => {
                         playArcadeSfx('start')
                         onNavigate(`/games/${gid}`)
                       }}
@@ -458,7 +396,7 @@ export function ArcadeLobbyPage({
                     </button>
                   </div>
                 </div>
-              </div>
+              </article>
             )
           })}
         </main>

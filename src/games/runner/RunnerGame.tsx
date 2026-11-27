@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
+import { MobileGameHud } from '../../components/MobileGameHud'
+import { useCompactGameLayout } from '../../lib/gameLayout'
 import { PASSING_SCORE } from '../../domain/rules'
 import type { CoreValueCode, GameMode, RunEndReason, RunnerRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -49,6 +51,7 @@ export function RunnerGame({
   onFinishRound,
 }: RunnerGameProps) {
   const { prefs } = useArcadePreferences()
+  const compactLayout = useCompactGameLayout()
 
   const [snap, setSnap] = useState<RunnerSnapshot>(() =>
     new RunnerSimulation({ seed, mode, contentVersion, isPractice }).getSnapshot(),
@@ -58,6 +61,8 @@ export function RunnerGame({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const simRef = useRef<RunnerSimulation | null>(null)
   const finishedOnceRef = useRef(false)
+  const shockStartedMsRef = useRef(-Infinity)
+  const shieldBlockStartedMsRef = useRef(-Infinity)
   const vfxPopupsRef = useRef<
     Array<{
       text: string
@@ -153,6 +158,7 @@ export function RunnerGame({
         e.key === 'w' ||
         e.key === 'W'
       ) {
+        if (e.key === ' ' && e.target instanceof HTMLButtonElement) return
         e.preventDefault()
         e.stopPropagation()
         if (!e.repeat) {
@@ -228,6 +234,7 @@ export function RunnerGame({
         playArcadeSfx('shield')
         spawnHitVfx('🛡️ 실드 장착 +1!', '#43E7F2')
       } else if (effects.shieldBlocked) {
+        shieldBlockStartedMsRef.current = nextSnap.elapsedMs
         playArcadeSfx('shield')
         spawnHitVfx('🛡️ 실드 완벽 방어!', '#43E7F2')
       } else if (effects.collectedBonus === 'jump_ramp') {
@@ -240,6 +247,7 @@ export function RunnerGame({
           CORE_COLORS[effects.boostedLetter],
         )
       } else if (effects.stunnedBy === 'emp_shock') {
+        shockStartedMsRef.current = nextSnap.elapsedMs
         playArcadeSfx('stun')
         spawnHitVfx('⚡감전 정지 −3', '#FF6B7A')
       } else if (effects.stunnedBy === 'barricade') {
@@ -463,10 +471,32 @@ export function RunnerGame({
       ctx.restore()
     }
 
+    if (snap.hyperRemainMs > 0 && !prefs.reduceMotion) {
+      const colors = ['#43E7F2', '#A78BFA', '#FF6B9E', '#FFBD64', '#B9F66C']
+      const phase = snap.distance / 46
+      ctx.save()
+      for (let ring = 0; ring < 6; ring += 1) {
+        const depth = ((ring + phase) % 6) / 6
+        const radius = 22 + depth * depth * w * 0.69
+        ctx.globalAlpha = Math.sin(Math.PI * depth) * 0.44
+        ctx.strokeStyle = colors[ring % colors.length]!
+        ctx.lineWidth = 1 + depth * 4
+        ctx.beginPath()
+        ctx.ellipse(w / 2, horizonY, radius, radius * 0.46, 0, Math.PI, 0)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.ellipse(w / 2, horizonY, radius, radius * 0.38, 0, 0.24, 0.88)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.ellipse(w / 2, horizonY, radius, radius * 0.38, 0, Math.PI - 0.88, Math.PI - 0.24)
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
+
     // Speed lines during Boost / Hyper Boost
     if ((snap.boostRemainMs > 0 || snap.hyperRemainMs > 0) && !prefs.reduceMotion) {
-      ctx.strokeStyle =
-        snap.hyperRemainMs > 0 ? 'rgba(255, 107, 158, 0.58)' : 'rgba(185, 246, 108, 0.44)'
+      ctx.strokeStyle = snap.hyperRemainMs > 0 ? '#FF6B9E94' : '#B9F66C70'
       ctx.lineWidth = snap.hyperRemainMs > 0 ? 3.2 : 2.4
       for (let i = 0; i < 10; i += 1) {
         const side = i % 2 === 0 ? -1 : 1
@@ -483,6 +513,24 @@ export function RunnerGame({
       const rz = ent.z - snap.distance
       return rz >= -22 && rz <= visibleRangeZ
     })
+
+    for (const hazard of visibleEntities) {
+      const distance = hazard.z - snap.distance
+      if (hazard.kind !== 'hazard' || hazard.triggered || distance < 18 || distance > 150) continue
+      const position = projectPoint(hazard.lane - 1, distance)
+      const halfWidth = position.halfW * 0.28
+      const height = 12 * position.scale
+      ctx.save()
+      ctx.globalAlpha = 0.34 + (1 - distance / 150) * 0.5
+      ctx.strokeStyle = hazard.hazardKind === 'emp_shock' ? '#FF6B9E' : '#FFBD64'
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.moveTo(position.x - halfWidth, position.y + height)
+      ctx.lineTo(position.x, position.y - height)
+      ctx.lineTo(position.x + halfWidth, position.y + height)
+      ctx.stroke()
+      ctx.restore()
+    }
 
     for (let i = visibleEntities.length - 1; i >= 0; i -= 1) {
       const ent = visibleEntities[i]!
@@ -724,6 +772,19 @@ export function RunnerGame({
     const runnerGroundY = playerProj.y
     const runnerBodyY = runnerGroundY - jumpLiftPx
 
+    if (snap.jumpRemainingMs > 0) {
+      const remainingDistance = getSim().baseSpeedPerSec * snap.speedMultiplier * snap.jumpRemainingMs / 1000
+      const landing = projectPoint(snap.lane - 1, remainingDistance)
+      ctx.save()
+      ctx.strokeStyle = '#B9F66C'
+      ctx.setLineDash([5, 4])
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.ellipse(landing.x, landing.y + 8, 25 * landing.scale, 10 * landing.scale, 0, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.52)'
     ctx.beginPath()
     ctx.ellipse(
@@ -750,14 +811,25 @@ export function RunnerGame({
     }
 
     // Active Shield Bubble Aura around Runner!
-    if (snap.hasShield) {
+    const blockAge = snap.elapsedMs - shieldBlockStartedMsRef.current
+    if (snap.hasShield || blockAge < 500) {
+      ctx.save()
+      const blockProgress = snap.hasShield || prefs.reduceMotion ? 0 : blockAge / 500
+      ctx.globalAlpha = 1 - blockProgress
       ctx.strokeStyle = '#43E7F2'
       ctx.fillStyle = 'rgba(67, 231, 242, 0.16)'
       ctx.lineWidth = 3
       ctx.beginPath()
-      ctx.arc(0, -18, 40, 0, Math.PI * 2)
+      ctx.arc(0, -18, 40 + blockProgress * 35, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
+      if (!snap.hasShield) {
+        ctx.fillStyle = '#E5FFFF'
+        ctx.font = '800 16px "Paperlogy", sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('실드 사용', 0, -62)
+      }
+      ctx.restore()
     }
 
     // Glowing Plasma Hoverboard under Runner's Feet!
@@ -878,6 +950,26 @@ export function RunnerGame({
 
     ctx.restore()
 
+    const shockFade = Math.max(0, 1 - (snap.elapsedMs - shockStartedMsRef.current) / 330)
+    if (shockFade > 0 && !prefs.reduceMotion) {
+      ctx.save()
+      ctx.globalAlpha = shockFade * 0.16
+      ctx.fillStyle = '#A78BFA'
+      ctx.fillRect(0, 0, w, h)
+      ctx.globalAlpha = shockFade * 0.84
+      ctx.strokeStyle = '#E9D5FF'
+      ctx.lineWidth = 2
+      for (const side of [-1, 1]) {
+        ctx.beginPath()
+        ctx.moveTo(runnerX, runnerBodyY - 18)
+        for (let i = 1; i <= 6; i += 1) {
+          ctx.lineTo(runnerX + side * (i * 23), runnerBodyY - i * 10 + (i % 2) * 21)
+        }
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
+
     // Draw Burst Sparks & Floating Score/Status Popups!
     for (const sp of vfxSparksRef.current) {
       const spProj = projectPoint(sp.lane - 1, 0)
@@ -907,7 +999,7 @@ export function RunnerGame({
       ctx.fillText(pop.text, popProj.x, liftY)
       ctx.restore()
     }
-  }, [prefs.reduceMotion, snap])
+  }, [compactLayout, getSim, prefs.reduceMotion, snap])
 
   const remainSec = Math.ceil(snap.remainingMs / 1000)
   const progressPct = Math.min(100, Math.round((snap.distance / snap.trackLength) * 100))
@@ -917,16 +1009,17 @@ export function RunnerGame({
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 7 }}>
       {/* Top HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0 }}>
+        <MobileGameHud remaining={`${remainSec}s`} score={snap.score} practice={isPractice} practiceCleared={snap.practiceCleared} detail={<>{speedPct}% 속도 · {snap.currentSetLetters.join(' · ') || 'C·O·R·E'}{snap.hasShield && ' · 실드'}</>} />
         <div className="hud-metric" style={{ flexWrap: 'wrap', gap: 10 }}>
           <CoreBotMascot
             mood={
-              snap.cleared
-                ? 'crown'
-                : snap.stunRemainMs > 0
-                  ? 'danger'
-                  : snap.hyperRemainMs > 0 || snap.boostRemainMs > 0
-                    ? 'fever'
-                    : 'cheer'
+              snap.stunRemainMs > 0 || snap.slipRemainMs > 0 || snap.sludgeRemainMs > 0
+                ? 'danger'
+                : snap.hyperRemainMs > 0 || snap.boostRemainMs > 0
+                  ? 'fever'
+                  : snap.cleared
+                    ? 'victory'
+                    : 'idle'
             }
             size={36}
           />
@@ -1047,10 +1140,9 @@ export function RunnerGame({
         </div>
       </div>
 
-      {!isPractice && <PassMilestoneBanner cleared={snap.cleared} score={snap.score} />}
-
       {/* Compact 8-Device Quick Legend Strip */}
       <div
+        className="runner-device-legend"
         style={{
           display: 'flex',
           flexWrap: 'wrap',
@@ -1080,6 +1172,7 @@ export function RunnerGame({
 
       {/* Live Status Callout */}
       <div
+        className="runner-status-card"
         style={{
           padding: '7px 13px',
           borderRadius: 8,
@@ -1117,6 +1210,7 @@ export function RunnerGame({
 
       {/* Perspective 3-Lane Runner Canvas */}
       <div
+        className="game-arena game-arena-runner"
         style={{
           position: 'relative',
           flex: 1,
@@ -1128,9 +1222,10 @@ export function RunnerGame({
           display: 'flex',
         }}
       >
+        {!isPractice && snap.cleared && <PassMilestoneBanner score={snap.score} scoreCanDrop />}
         <canvas
           ref={canvasRef}
-          width={1040}
+          width={compactLayout ? 720 : 1040}
           height={375}
           onClick={(e) => {
             if (tabPaused || finishedOnceRef.current) return
@@ -1210,6 +1305,7 @@ export function RunnerGame({
 
       {/* Tactile Arcade Controls */}
       <div
+        className="game-touch-controls"
         style={{
           display: 'grid',
           gridTemplateColumns: '1fr 1.25fr 1fr',
@@ -1222,7 +1318,7 @@ export function RunnerGame({
           onClick={() => handleSwitchLane(-1)}
           disabled={tabPaused || snap.finished}
         >
-          ◀ 왼쪽 트랙 (← / A)
+          ◀ 왼쪽
         </button>
         <button
           type="button"
@@ -1230,7 +1326,7 @@ export function RunnerGame({
           onClick={handleJump}
           disabled={tabPaused || snap.finished}
         >
-          🦘 점프로 장애물 넘기 (Space / ↑)
+          ↑ 점프
         </button>
         <button
           type="button"
@@ -1238,7 +1334,7 @@ export function RunnerGame({
           onClick={() => handleSwitchLane(1)}
           disabled={tabPaused || snap.finished}
         >
-          오른쪽 트랙 (→ / D) ▶
+          오른쪽 ▶
         </button>
       </div>
     </div>

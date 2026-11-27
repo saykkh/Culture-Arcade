@@ -67,7 +67,7 @@ function RollingScoreNumber({ target }: { target: number }) {
 }
 
 function formatResultFeedback(
-  result: FinalizeRunResponse,
+  result: Pick<FinalizeRunResponse, 'score' | 'cleared' | 'actionSummary' | 'previousActionSummary'>,
   contentVersion: string,
 ): {
   achievedHeadline: string
@@ -189,7 +189,41 @@ function formatResultFeedback(
   }
 }
 
-const COUNTDOWN_STEPS = ['3', '2', '1', 'GO!'] as const
+const COUNTDOWN_STEPS = [
+  { label: 'READY?', durationMs: 560 },
+  { label: '3', durationMs: 520 },
+  { label: '2', durationMs: 520 },
+  { label: '1', durationMs: 520 },
+  { label: 'GO!', durationMs: 420 },
+] as const
+
+function CableTransfer({ gameId }: { gameId: GameId }) {
+  const particleRef = useRef<HTMLSpanElement>(null)
+  const { prefs } = useArcadePreferences()
+
+  useEffect(() => {
+    const particle = particleRef.current
+    const cabinet = particle?.closest('.game-cabinet-shell')
+    const source = cabinet?.querySelector('.result-stamp')?.getBoundingClientRect()
+    const target = cabinet?.querySelector(`[data-cable-socket="${gameId}"]`)?.getBoundingClientRect()
+    if (!particle || !source || !target || prefs.reduceMotion) return
+
+    const x = source.left + source.width / 2
+    const y = source.top + source.height / 2
+    const dx = target.left + target.width / 2 - x
+    const dy = target.top + target.height / 2 - y
+    particle.style.left = `${x}px`
+    particle.style.top = `${y}px`
+    const motion = particle.animate([
+      { transform: 'translate(-50%, -50%) scale(0.6)', opacity: 0 },
+      { transform: `translate(calc(-50% + ${dx * 0.25}px), calc(-50% + ${dy * 0.45}px)) scale(1.5)`, opacity: 1, offset: 0.38 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.3)`, opacity: 0 },
+    ], { duration: 720, delay: 180, easing: 'cubic-bezier(0.24, 0.64, 0.34, 1)' })
+    return () => motion.cancel()
+  }, [gameId, prefs.reduceMotion])
+
+  return <span className="cable-transfer" ref={particleRef} aria-hidden="true" />
+}
 
 export function GameCabinetPage({
   gameId,
@@ -205,6 +239,7 @@ export function GameCabinetPage({
   const [selectedMode, setSelectedMode] = useState<GameMode>('standard')
   const [stage, setStage] = useState<CabinetStage>('briefing')
   const [countdownIdx, setCountdownIdx] = useState(0)
+  const [launching, setLaunching] = useState(false)
   const [practiceStatus, setPracticeStatus] = useState<'active' | 'cleared' | 'time_up'>('active')
   const [practiceRunKey, setPracticeRunKey] = useState(1)
 
@@ -215,6 +250,7 @@ export function GameCabinetPage({
     endReason: RunEndReason
   } | null>(null)
   const [finalResult, setFinalResult] = useState<FinalizeRunResponse | null>(null)
+  const [previousBest, setPreviousBest] = useState<number | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [deadlineWarning, setDeadlineWarning] = useState<string | null>(null)
   const [showAssistHelp, setShowAssistHelp] = useState(false)
@@ -222,6 +258,7 @@ export function GameCabinetPage({
 
   const monitorRef = useRef<HTMLDivElement | null>(null)
   const startRealBtnRef = useRef<HTMLButtonElement | null>(null)
+  const launchInFlightRef = useRef(false)
 
   useEffect(() => {
     const onFsChange = () => {
@@ -231,22 +268,20 @@ export function GameCabinetPage({
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
 
-  // 3 -> 2 -> 1 -> GO! Arcade Launch Sequence
   useEffect(() => {
     if (stage !== 'countdown') return
-    if (countdownIdx >= COUNTDOWN_STEPS.length - 1) {
-      playArcadeSfx('go')
-      const doneTimer = window.setTimeout(() => {
-        setStage('playing')
-      }, 340)
-      return () => window.clearTimeout(doneTimer)
+    if (prefs.reduceMotion) {
+      const skipTimer = window.setTimeout(() => setStage('playing'), 0)
+      return () => window.clearTimeout(skipTimer)
     }
-    playArcadeSfx('countdown')
-    const stepTimer = window.setTimeout(() => {
-      setCountdownIdx((i) => i + 1)
-    }, 390)
-    return () => window.clearTimeout(stepTimer)
-  }, [countdownIdx, stage])
+    const step = COUNTDOWN_STEPS[countdownIdx]!
+    if (countdownIdx > 0) playArcadeSfx(step.label === 'GO!' ? 'go' : 'countdown')
+    const timer = window.setTimeout(() => {
+      if (step.label === 'GO!') setStage('playing')
+      else setCountdownIdx(countdownIdx + 1)
+    }, step.durationMs)
+    return () => window.clearTimeout(timer)
+  }, [countdownIdx, prefs.reduceMotion, stage])
 
   useEffect(() => {
     if (!activeRun || stage === 'result' || stage === 'briefing') {
@@ -307,6 +342,9 @@ export function GameCabinetPage({
   }
 
   const launchServerRun = async (overrideMode?: GameMode) => {
+    if (launchInFlightRef.current) return
+    launchInFlightRef.current = true
+    setLaunching(true)
     const modeToUse = overrideMode ?? selectedMode
     if (overrideMode) setSelectedMode(overrideMode)
     setErrorMsg(null)
@@ -314,6 +352,7 @@ export function GameCabinetPage({
     try {
       playArcadeSfx('start')
       const started = await arcadeApi.startRun(gameId, modeToUse)
+      setPreviousBest(modeToUse === 'assisted' ? gameProg?.assistedBestScore ?? null : gameProg?.standardBestScore ?? null)
       setActiveRun(started)
       setFinalResult(null)
       setPendingPayload(null)
@@ -328,6 +367,9 @@ export function GameCabinetPage({
       setErrorMsg(
         err instanceof ClientApiError ? err.message : '게임 시작 요청에 실패했습니다.',
       )
+    } finally {
+      launchInFlightRef.current = false
+      setLaunching(false)
     }
   }
 
@@ -374,17 +416,24 @@ export function GameCabinetPage({
   }
 
   const gameProg = me.games.find((g) => g.gameId === gameId)
+  const latestAttempt = gameProg?.latestAttempt
+  const briefingTip = stage === 'briefing' && latestAttempt
+    ? formatResultFeedback({ ...latestAttempt, previousActionSummary: null }, me.contentVersion).nextActionTip
+    : null
+  const firstVisit = !gameProg?.finalizedAttemptCount
   const isCompactMonitor = stage === 'playing' || stage === 'practice' || stage === 'countdown'
   const showLiveStageBackdrop = stage === 'briefing' || stage === 'countdown' || stage === 'result'
 
   return (
-    <div className="arcade-shell has-backdrop" style={{ position: 'relative', overflow: 'hidden' }}>
+    <div className="arcade-shell has-backdrop game-cabinet-shell" data-stage={stage} style={{ position: 'relative', overflow: 'hidden' }}>
       <ArcadeVideoBackdrop intensity="vivid" />
+      {stage === 'result' && finalResult?.newlyLitSocket && <CableTransfer gameId={finalResult.gameId} />}
 
       <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1, gap: 8 }}>
         <ArcadeHeader
           me={me}
           compact={isCompactMonitor}
+          justLitGameId={stage === 'result' && finalResult?.newlyLitSocket ? finalResult.gameId : undefined}
           onNavigate={onNavigate}
           onLogout={() => void onLogout()}
         />
@@ -408,7 +457,7 @@ export function GameCabinetPage({
                   position: 'absolute',
                   inset: 0,
                   zIndex: 0,
-                  opacity: stage === 'countdown' ? 0.52 : 0.34,
+                  opacity: stage === 'result' ? 0.48 : 0.8,
                   pointerEvents: 'none',
                 }}
               >
@@ -418,7 +467,7 @@ export function GameCabinetPage({
                     position: 'absolute',
                     inset: 0,
                     background:
-                      'radial-gradient(circle at 50% 50%, rgba(8,13,24,0.35) 0%, rgba(8,13,24,0.84) 100%)',
+                      'linear-gradient(180deg, rgba(8,13,24,0.36), rgba(8,13,24,0.12) 36%, rgba(8,13,24,0.18) 76%, rgba(8,13,24,0.52))',
                   }}
                 />
               </div>
@@ -427,6 +476,7 @@ export function GameCabinetPage({
             <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1 }}>
               {/* Top Monitor Bezel Bar */}
               <div
+                className="game-monitor-toolbar"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -435,7 +485,7 @@ export function GameCabinetPage({
                   gap: 10,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="game-monitor-title">
                   <span
                     className="cabinet-badge-type"
                     style={{
@@ -449,7 +499,7 @@ export function GameCabinetPage({
                   <strong style={{ fontSize: 18 }}>{meta.title}</strong>
                   {stage === 'playing' && activeRun && (
                     <span
-                      className="sample-pill"
+                      className="sample-pill game-monitor-mode"
                       style={{
                         borderColor: 'var(--accent-select)',
                         color: 'var(--accent-select)',
@@ -461,7 +511,7 @@ export function GameCabinetPage({
                   )}
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="game-monitor-actions">
                   <button
                     type="button"
                     className="btn-arcade btn-compact"
@@ -474,7 +524,7 @@ export function GameCabinetPage({
                     className="btn-arcade btn-compact"
                     onClick={() => onNavigate('/arcade')}
                   >
-                    {stage === 'playing' ? '중단하고 로비로 (기존 기록 유지)' : '← 오락실 로비'}
+                    {stage === 'playing' ? '중단하고 로비로' : '← 오락실 로비'}
                   </button>
                 </div>
               </div>
@@ -501,12 +551,12 @@ export function GameCabinetPage({
                 </div>
               ) : stage === 'briefing' ? (
                 /* 1) Dynamic Stage Intro Briefing with Mascot + Live Stage Backdrop */
-                <div className="center-card-wrap">
+                <div className="center-card-wrap game-briefing">
                   <div
                     className="cabinet-modal-card"
                     style={{
                       maxWidth: 740,
-                      background: 'rgba(20, 29, 44, 0.9)',
+                      background: 'rgba(15, 24, 39, 0.85)',
                       backdropFilter: 'blur(16px)',
                       borderColor: `${meta.accentColor}88`,
                       boxShadow: `0 20px 48px rgba(0,0,0,0.65), 0 0 28px ${meta.accentColor}26`,
@@ -527,9 +577,7 @@ export function GameCabinetPage({
                         size={56}
                         accentColor={meta.accentColor}
                         speech={
-                          gameProg?.cleared
-                            ? `이미 통과한 스테이지네요! 이번엔 최고 기록 경신에 도전해 볼까요?`
-                            : `환영합니다! 10점만 달성하면 즉시 케이블이 점등되고, 끝까지 최고점 경쟁이 이어집니다!`
+                          briefingTip ?? (firstVisit ? '처음이라면 연습에서 조작을 한 번 해보세요.' : '바로 도전해 이전 기록을 넘겨보세요.')
                         }
                       />
                     </div>
@@ -544,7 +592,7 @@ export function GameCabinetPage({
                       )}
                     </div>
 
-                    <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+                    <div className="game-briefing-overview" style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
                       <div
                         style={{
                           padding: '12px 14px',
@@ -559,7 +607,7 @@ export function GameCabinetPage({
                         <div style={{ fontSize: 15.5, fontWeight: 700 }}>{meta.howToPlayOneLine}</div>
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div className="game-briefing-rules" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                         <div
                           style={{
                             padding: '11px 14px',
@@ -589,10 +637,14 @@ export function GameCabinetPage({
                             🏆 3. 통과 기준 & 보너스 타임
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 700 }}>
-                            10점 달성 시 즉시 통과! (기본 +2점)
+                            {gameId === 'runner'
+                              ? `최종 점수 ${PASSING_SCORE}점 이상이면 통과`
+                              : `${PASSING_SCORE}점에 도달하면 통과 (기본 +2점)`}
                           </div>
                           <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                            통과 후에도 끝까지 점수를 쌓아 TOP 10에 도전하세요!
+                            {gameId === 'runner'
+                              ? '장애물 감점에 주의하며 점수를 지키세요.'
+                              : '통과 후에도 끝까지 점수를 쌓아 TOP 10에 도전하세요!'}
                           </div>
                         </div>
                       </div>
@@ -663,21 +715,22 @@ export function GameCabinetPage({
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }}>
+                    <div className="game-briefing-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }}>
                       <button
                         type="button"
-                        className="btn-arcade"
+                        className={`btn-arcade ${firstVisit ? 'btn-start' : ''}`}
                         onClick={startPractice}
                       >
-                        30초 연습 해보기
+                        {firstVisit ? '조작 한 번 연습하기' : '30초 연습'}
                       </button>
                       <button
                         type="button"
-                        className="btn-arcade btn-start landing-cta-pulse"
+                        className={`btn-arcade ${firstVisit ? '' : 'btn-start landing-cta-pulse'}`}
                         style={{ fontSize: 16.5, padding: '11px 24px' }}
+                        disabled={launching}
                         onClick={() => void launchServerRun()}
                       >
-                        ⚡ 본게임 바로 START ▶
+                        {launching ? '불러오는 중…' : '⚡ 본게임 바로 START ▶'}
                       </button>
                     </div>
                   </div>
@@ -686,8 +739,7 @@ export function GameCabinetPage({
                 /* Arcade 3 · 2 · 1 · GO! Launch Screen */
                 <div
                   className="center-card-wrap"
-                  onClick={() => setStage('playing')}
-                  style={{ flexDirection: 'column', gap: 14, cursor: 'pointer' }}
+                  style={{ flexDirection: 'column', gap: 14 }}
                 >
                   <CoreBotMascot
                     mood="fever"
@@ -697,12 +749,12 @@ export function GameCabinetPage({
                   <div style={{ fontSize: 16, fontWeight: 800, color: meta.accentColor, letterSpacing: '0.1em' }}>
                     STAGE 0{meta.socketIndex + 1} · {meta.title}
                   </div>
-                  <div key={countdownIdx} className="countdown-zoom-digit">
-                    {COUNTDOWN_STEPS[countdownIdx]}
+                  <div key={countdownIdx} className="countdown-zoom-digit" aria-hidden="true">
+                    {COUNTDOWN_STEPS[countdownIdx]!.label}
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    클릭하면 즉시 시작합니다
-                  </div>
+                  <button type="button" className="btn-arcade btn-compact" onClick={() => setStage('playing')}>
+                    카운트다운 건너뛰기
+                  </button>
                 </div>
               ) : stage === 'practice' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
@@ -731,6 +783,7 @@ export function GameCabinetPage({
                         ref={startRealBtnRef}
                         type="button"
                         className="btn-arcade btn-compact btn-start"
+                        disabled={launching}
                         onClick={() => void launchServerRun()}
                       >
                         {practiceStatus === 'active' ? '연습 건너뛰기 · 본게임 시작 ▶' : '본게임 시작 ▶'}
@@ -818,6 +871,7 @@ export function GameCabinetPage({
                     (finalResult.cleared &&
                       finalResult.requiredClearedCount === REQUIRED_GAME_ORDER.length)
                   const nextRecommendedId = finalResult.recommendation.targetGameId
+                  const personalBestIncrease = previousBest !== null ? finalResult.score - previousBest : 0
 
                   return (
                     <div className="center-card-wrap">
@@ -830,14 +884,19 @@ export function GameCabinetPage({
                           borderColor: finalResult.cleared ? 'var(--accent-clear)' : 'var(--accent-warn)',
                         }}
                       >
+                        {personalBestIncrease > 0 ? (
+                          <p className="result-leading-tip result-best-increase">개인 최고 +{personalBestIncrease}점</p>
+                        ) : (
+                          <p className="result-leading-tip">{fb.nextActionTip}</p>
+                        )}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
                           <CoreBotMascot
                             mood={
                               isAllFourCompleted
                                 ? 'crown'
                                 : finalResult.cleared
-                                  ? 'fever'
-                                  : 'cheer'
+                                  ? 'victory'
+                                  : 'retry'
                             }
                             size={58}
                             speech={
@@ -848,6 +907,9 @@ export function GameCabinetPage({
                                   : '아깝네요! 방금 감을 잡았으니 한 번 더 도전해 볼까요?'
                             }
                           />
+                          <span aria-hidden="true" className={`result-stamp ${finalResult.cleared ? 'is-clear' : ''}`}>
+                            {finalResult.cleared ? 'CLEAR!' : 'RETRY!'}
+                          </span>
                           <span className="mono-num" style={{ fontSize: 20 }}>
                             이번 점수 <RollingScoreNumber target={finalResult.score} />점 · 내 최고{' '}
                             <strong>{finalResult.personalBestScore}</strong>점
@@ -861,7 +923,7 @@ export function GameCabinetPage({
                           </div>
                         )}
 
-                        <div
+                        {personalBestIncrease > 0 && <div
                           style={{
                             padding: '11px 14px',
                             borderRadius: 8,
@@ -873,7 +935,7 @@ export function GameCabinetPage({
                         >
                           <strong style={{ color: 'var(--accent-warn)' }}>다음 판 핵심 팁:</strong>{' '}
                           {fb.nextActionTip}
-                        </div>
+                        </div>}
 
                         {showAssistHelp && (
                           <div className="status-alert clear" style={{ marginBottom: 14, justifyContent: 'space-between' }}>
