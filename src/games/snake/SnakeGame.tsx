@@ -84,6 +84,7 @@ export function SnakeGame({
   const [directionState, setDirectionState] = useState<GridDirection>(initialSnake.direction)
   const [candidates, setCandidates] = useState<CandidateChunkOnGrid[]>(initialCandidates)
   const [practiceCleared, setPracticeCleared] = useState(false)
+  const [eatBurst, setEatBurst] = useState<{ x: number; y: number; label: string } | null>(null)
 
   const [wrongOverlay, setWrongOverlay] = useState<{
     chosenText: string
@@ -208,6 +209,15 @@ export function SnakeGame({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [wrongOverlay, tabPaused, confirmWrongOverlay])
 
+  const queueDirectionInput = useCallback((desired: GridDirection) => {
+    if (finishedRef.current || modalPausedRef.current) return
+    const baseDir = queuedDirRef.current ?? dirRef.current
+    if (desired !== baseDir && !isOppositeDirection(baseDir, desired)) {
+      queuedDirRef.current = desired
+      playArcadeSfx('select')
+    }
+  }, [])
+
   const isSimulationPaused = tabPaused || Boolean(wrongOverlay) || practiceCleared
 
   useEffect(() => {
@@ -309,6 +319,10 @@ export function SnakeGame({
         }
 
         if (hitCandidate.isCorrect) {
+          if (!prefs.reduceMotion) {
+            setEatBurst({ x: nextHead.x, y: nextHead.y, label: '+2점!' })
+            window.setTimeout(() => setEatBurst(null), 420)
+          }
           // Cap max visual tail length at 12 so endless high-score play stays nimble & fun!
           const grownBody = [nextHead, ...currentBody].slice(0, 12)
           bodyRef.current = grownBody
@@ -435,6 +449,7 @@ export function SnakeGame({
     seed,
     finishOnce,
     onPracticeSuccess,
+    prefs.reduceMotion,
   ])
 
   // Render Wide 20x12 Neon Cyber-Snake Arena (1100 x 504)
@@ -588,7 +603,22 @@ export function SnakeGame({
       ctx.fillStyle = '#F2F6FB'
       ctx.fillText(label, clampedX, pillY + 0.5)
     }
-  }, [snakeBody, candidates, directionState, prefs.reduceMotion])
+
+    if (eatBurst && !prefs.reduceMotion) {
+      const bx = (eatBurst.x + 0.5) * cellW
+      const by = (eatBurst.y + 0.5) * cellH
+      ctx.save()
+      ctx.strokeStyle = '#B9F66C'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(bx, by, 28, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.font = '900 18px "Paperlogy", sans-serif'
+      ctx.fillStyle = '#B9F66C'
+      ctx.fillText(eatBurst.label, bx, by - 26)
+      ctx.restore()
+    }
+  }, [snakeBody, candidates, directionState, eatBurst, prefs.reduceMotion])
 
   const currentSentence = sentences[sentenceCursor % sentences.length]!
   const collectedChunks = currentSentence.chunks.slice(0, stepIdx)
@@ -811,6 +841,48 @@ export function SnakeGame({
             </button>
           </div>
         )}
+      </div>
+
+      {/* Tactile Arcade D-Pad Controls (Mouse / Touch / Keyboard Friendly) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          gap: 8,
+        }}
+      >
+        <button
+          type="button"
+          className="btn-arcade btn-compact"
+          disabled={isSimulationPaused}
+          onClick={() => queueDirectionInput('left')}
+        >
+          ◀ 좌측 (← / A)
+        </button>
+        <button
+          type="button"
+          className="btn-arcade btn-compact"
+          disabled={isSimulationPaused}
+          onClick={() => queueDirectionInput('up')}
+        >
+          ▲ 상단 (↑ / W)
+        </button>
+        <button
+          type="button"
+          className="btn-arcade btn-compact"
+          disabled={isSimulationPaused}
+          onClick={() => queueDirectionInput('down')}
+        >
+          ▼ 하단 (↓ / S)
+        </button>
+        <button
+          type="button"
+          className="btn-arcade btn-compact"
+          disabled={isSimulationPaused}
+          onClick={() => queueDirectionInput('right')}
+        >
+          우측 (→ / D) ▶
+        </button>
       </div>
     </div>
   )

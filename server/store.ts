@@ -1164,14 +1164,13 @@ export class ArcadeStore {
 
   getLeaderboard(token: string | undefined, rawGameId: string) {
     const caller = this.authenticateParticipantSession(token)
-    if (!isRequiredGameId(rawGameId)) {
+    if (rawGameId !== 'total' && !isRequiredGameId(rawGameId)) {
       throw new ArcadeApiError(
         400,
         'INVALID_LEADERBOARD_GAME',
-        '랭킹은 4종 게임에 대해서만 제공됩니다.',
+        '랭킹은 4종 게임 및 종합(total)에 대해서만 제공됩니다.',
       )
     }
-    const gameId = rawGameId
     const lv =
       this.state.learningVersions.find((v) => v.id === caller.learningVersionId) ??
       this.state.learningVersions[0]!
@@ -1180,6 +1179,96 @@ export class ArcadeStore {
         .filter((p) => p.learningVersionId === caller.learningVersionId)
         .map((p) => [p.id, p]),
     )
+
+    if (rawGameId === 'total') {
+      const byParticipant = new Map<
+        string,
+        {
+          totalScore: number
+          assistedSum: number
+          hasAssisted: boolean
+          clearedCount: number
+          latestAchievedAt: string
+        }
+      >()
+      for (const prog of this.state.progress) {
+        if (!sameVersionParticipantMap.has(prog.participantId) || !isRequiredGameId(prog.gameId)) {
+          continue
+        }
+        const cur = byParticipant.get(prog.participantId) ?? {
+          totalScore: 0,
+          assistedSum: 0,
+          hasAssisted: false,
+          clearedCount: 0,
+          latestAchievedAt: '',
+        }
+        if (prog.standardBestScore !== null && prog.standardBestAchievedAt !== null) {
+          cur.totalScore += prog.standardBestScore
+          if (
+            !cur.latestAchievedAt ||
+            Date.parse(prog.standardBestAchievedAt) > Date.parse(cur.latestAchievedAt)
+          ) {
+            cur.latestAchievedAt = prog.standardBestAchievedAt
+          }
+        }
+        if (prog.assistedBestScore !== null) {
+          cur.assistedSum += prog.assistedBestScore
+          cur.hasAssisted = true
+        }
+        if (prog.firstClearedAt) {
+          cur.clearedCount += 1
+        }
+        byParticipant.set(prog.participantId, cur)
+      }
+
+      const rankedTotal = [...byParticipant.entries()]
+        .filter(([, agg]) => agg.latestAchievedAt !== '')
+        .sort(([idA, a], [idB, b]) => {
+          if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore
+          if (b.clearedCount !== a.clearedCount) return b.clearedCount - a.clearedCount
+          const tDiff = Date.parse(a.latestAchievedAt) - Date.parse(b.latestAchievedAt)
+          if (tDiff !== 0) return tDiff
+          return idA.localeCompare(idB)
+        })
+        .map(([pid, agg], idx) => {
+          const p = sameVersionParticipantMap.get(pid)!
+          return {
+            rank: idx + 1,
+            participantId: pid,
+            nickname: p.nickname ?? '익명 도전자',
+            score: agg.totalScore,
+            achievedAt: agg.latestAchievedAt,
+            cleared: agg.clearedCount === REQUIRED_GAME_ORDER.length,
+            isMe: pid === caller.id,
+          }
+        })
+
+      const myTotalEntry = rankedTotal.find((r) => r.participantId === caller.id) ?? null
+      const callerAgg = byParticipant.get(caller.id)
+
+      return {
+        gameId: 'total',
+        gameTitle: '4종 합산 종합 랭킹 (GRAND PRIX)',
+        ruleVersion: lv.ruleVersion,
+        contentVersion: lv.contentVersion,
+        top10: rankedTotal.slice(0, 10).map(({ participantId: _pid, ...pub }) => pub),
+        totalRankedCount: rankedTotal.length,
+        myStanding: myTotalEntry
+          ? {
+              rank: myTotalEntry.rank,
+              score: myTotalEntry.score,
+              achievedAt: myTotalEntry.achievedAt,
+              nickname: myTotalEntry.nickname,
+            }
+          : null,
+        assistedBestScore: callerAgg?.hasAssisted ? callerAgg.assistedSum : null,
+        noStandardScoreNotice: myTotalEntry
+          ? null
+          : '아직 정규 모드(기본 속도) 플레이 기록이 없습니다. 4종 게임을 기본 속도로 플레이하면 합산 종합 순위가 집계됩니다.',
+      }
+    }
+
+    const gameId = rawGameId
 
     const ranked = this.state.progress
       .filter(

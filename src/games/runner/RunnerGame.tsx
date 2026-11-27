@@ -57,6 +57,27 @@ export function RunnerGame({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const simRef = useRef<RunnerSimulation | null>(null)
   const finishedOnceRef = useRef(false)
+  const vfxPopupsRef = useRef<
+    Array<{
+      text: string
+      color: string
+      lane: number
+      ageMs: number
+      ttlMs: number
+    }>
+  >([])
+  const vfxSparksRef = useRef<
+    Array<{
+      lane: number
+      dx: number
+      dy: number
+      vx: number
+      vy: number
+      color: string
+      ageMs: number
+      ttlMs: number
+    }>
+  >([])
 
   const getSim = useCallback(() => {
     if (!simRef.current) {
@@ -156,25 +177,85 @@ export function RunnerGame({
 
       const effects = sim.step(dt)
       const nextSnap = sim.getSnapshot()
-      setSnap(nextSnap)
+
+      // Advance VFX popups & sparks
+      vfxPopupsRef.current = vfxPopupsRef.current
+        .map((p) => ({ ...p, ageMs: p.ageMs + dt }))
+        .filter((p) => p.ageMs < p.ttlMs)
+      vfxSparksRef.current = vfxSparksRef.current
+        .map((s) => ({
+          ...s,
+          dx: s.dx + s.vx * (dt / 1000),
+          dy: s.dy + s.vy * (dt / 1000),
+          vy: s.vy + 280 * (dt / 1000),
+          ageMs: s.ageMs + dt,
+        }))
+        .filter((s) => s.ageMs < s.ttlMs)
+
+      const spawnHitVfx = (text: string, color: string) => {
+        vfxPopupsRef.current.push({
+          text,
+          color,
+          lane: nextSnap.visualLane,
+          ageMs: 0,
+          ttlMs: 880,
+        })
+        if (!prefs.reduceMotion) {
+          for (let k = 0; k < 10; k += 1) {
+            const ang = (Math.PI * 2 * k) / 10
+            vfxSparksRef.current.push({
+              lane: nextSnap.visualLane,
+              dx: 0,
+              dy: -24,
+              vx: Math.cos(ang) * (70 + (k % 3) * 35),
+              vy: Math.sin(ang) * 70 - 95,
+              color,
+              ageMs: 0,
+              ttlMs: 520,
+            })
+          }
+        }
+      }
 
       if (effects.completedCoreSet) {
         playArcadeSfx('clear')
+        spawnHitVfx('★ CORE 완성 +6!', '#B9F66C')
       } else if (effects.collectedBonus === 'hyper_ring') {
         playArcadeSfx('boost')
-      } else if (effects.collectedBonus === 'shield' || effects.shieldBlocked) {
+        spawnHitVfx('🚀 HYPER +3!', '#FF6B9E')
+      } else if (effects.collectedBonus === 'shield') {
         playArcadeSfx('shield')
+        spawnHitVfx('🛡️ 실드 장착 +1!', '#43E7F2')
+      } else if (effects.shieldBlocked) {
+        playArcadeSfx('shield')
+        spawnHitVfx('🛡️ 실드 완벽 방어!', '#43E7F2')
       } else if (effects.collectedBonus === 'jump_ramp') {
         playArcadeSfx('jump')
+        spawnHitVfx('🔼 슈퍼점프 +1!', '#C9FA87')
       } else if (effects.boostedLetter) {
         playArcadeSfx('boost')
-      } else if (effects.stunnedBy) {
+        spawnHitVfx(
+          `⚡[${effects.boostedLetter}] +2점!`,
+          CORE_COLORS[effects.boostedLetter],
+        )
+      } else if (effects.stunnedBy === 'emp_shock') {
         playArcadeSfx('stun')
-      } else if (effects.slippedOrSludged) {
+        spawnHitVfx('⚡감전 정지 −3', '#FF6B7A')
+      } else if (effects.stunnedBy === 'barricade') {
+        playArcadeSfx('stun')
+        spawnHitVfx('🚧충돌 정지 −2', '#FFBD64')
+      } else if (effects.slippedOrSludged === 'sludge') {
         playArcadeSfx('slip')
+        spawnHitVfx('🟣점착 감속 −2', '#D8B4FE')
+      } else if (effects.slippedOrSludged === 'banana') {
+        playArcadeSfx('slip')
+        spawnHitVfx('🍌미끄덩 −2', '#FFE047')
       } else if (effects.jumpedHazard) {
         playArcadeSfx('score')
+        spawnHitVfx('🦘 나이스 점프!', '#43E7F2')
       }
+
+      setSnap(nextSnap)
 
       if (effects.practiceJustCleared) {
         playArcadeSfx('clear')
@@ -192,7 +273,7 @@ export function RunnerGame({
 
     rafId = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(rafId)
-  }, [emitFinish, getSim, onPracticeSuccess, tabPaused])
+  }, [emitFinish, getSim, onPracticeSuccess, prefs.reduceMotion, tabPaused])
 
   // Render 3-Lane Track + All 8 Distinct Devices + Runner Character
   useEffect(() => {
@@ -704,6 +785,36 @@ export function RunnerGame({
     }
 
     ctx.restore()
+
+    // Draw Burst Sparks & Floating Score/Status Popups!
+    for (const sp of vfxSparksRef.current) {
+      const spProj = projectPoint(sp.lane - 1, 0)
+      const alpha = Math.max(0, 1 - sp.ageMs / sp.ttlMs)
+      ctx.save()
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = sp.color
+      ctx.beginPath()
+      ctx.arc(spProj.x + sp.dx, spProj.y + sp.dy, 4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    for (const pop of vfxPopupsRef.current) {
+      const popProj = projectPoint(pop.lane - 1, 0)
+      const prog = pop.ageMs / pop.ttlMs
+      const alpha = prog < 0.7 ? 1 : Math.max(0, (1 - prog) / 0.3)
+      const liftY = popProj.y - 76 - prog * 48
+      ctx.save()
+      ctx.globalAlpha = alpha
+      ctx.font = '900 19px "Paperlogy", sans-serif'
+      ctx.textAlign = 'center'
+      ctx.strokeStyle = '#050a14'
+      ctx.lineWidth = 4.5
+      ctx.strokeText(pop.text, popProj.x, liftY)
+      ctx.fillStyle = pop.color
+      ctx.fillText(pop.text, popProj.x, liftY)
+      ctx.restore()
+    }
   }, [prefs.reduceMotion, snap])
 
   const remainSec = Math.ceil(snap.remainingMs / 1000)

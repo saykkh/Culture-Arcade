@@ -20,7 +20,7 @@ export interface ShooterGameProps {
   }) => void
 }
 
-type QuestionPhase = 'aiming' | 'feedback'
+type QuestionPhase = 'aiming' | 'celebrate' | 'feedback'
 
 const CORE_ACCENTS: Record<CoreValueCode, string> = {
   C: '#43E7F2',
@@ -71,6 +71,10 @@ export function ShooterGame({
   const [practiceCleared, setPracticeCleared] = useState(false)
   const [missNotice, setMissNotice] = useState<string | null>(null)
   const [laserBeam, setLaserBeam] = useState<{ x: number; hit: boolean } | null>(null)
+  const [celebrateBurst, setCelebrateBurst] = useState<{
+    lane: 0 | 1 | 2
+    labelKo: string
+  } | null>(null)
 
   const [feedbackData, setFeedbackData] = useState<{
     outcome: 'correct' | 'wrong' | 'timeout'
@@ -210,12 +214,13 @@ export function ShooterGame({
       if (isCorrect) {
         playArcadeSfx('score')
         setCorrectCount((c) => c + 1)
-        setFeedbackData({
-          outcome: 'correct',
-          chosenLabel: chosenRec.display_ko,
-          correctLabel: correctRec.display_ko,
-          correctExplanation: current.item.explanation,
+        setMissNotice(null)
+        setCelebrateBurst({
+          lane: selectedLane,
+          labelKo: chosenRec.display_ko,
         })
+        phaseRef.current = 'celebrate'
+        setPhase('celebrate')
       } else {
         playArcadeSfx('wrong')
         setFeedbackData({
@@ -224,10 +229,9 @@ export function ShooterGame({
           correctLabel: correctRec.display_ko,
           correctExplanation: current.item.explanation,
         })
+        phaseRef.current = 'feedback'
+        setPhase('feedback')
       }
-
-      phaseRef.current = 'feedback'
-      setPhase('feedback')
     },
     [
       aimLimitMs,
@@ -288,7 +292,12 @@ export function ShooterGame({
   )
 
   const goNextQuestion = useCallback(() => {
-    if (finishedRef.current || phaseRef.current !== 'feedback') return
+    if (
+      finishedRef.current ||
+      (phaseRef.current !== 'feedback' && phaseRef.current !== 'celebrate')
+    ) {
+      return
+    }
     if (questionIdxRef.current >= roundItems.length - 1) {
       finishOnce('completed_all')
       return
@@ -297,6 +306,7 @@ export function ShooterGame({
     questionIdxRef.current = nextIdx
     setQuestionIdx(nextIdx)
     setFeedbackData(null)
+    setCelebrateBurst(null)
     setMissNotice(null)
     aimElapsedRef.current = 0
     setAimElapsedMs(0)
@@ -306,6 +316,15 @@ export function ShooterGame({
     setPhase('aiming')
     ensureAimStartedForCurrent()
   }, [ensureAimStartedForCurrent, finishOnce, roundItems.length])
+
+  // Auto-advance smoothly 720ms after a correct hit without blocking the screen with a modal!
+  useEffect(() => {
+    if (phase !== 'celebrate') return
+    const timer = window.setTimeout(() => {
+      goNextQuestion()
+    }, 720)
+    return () => window.clearTimeout(timer)
+  }, [goNextQuestion, phase])
 
   // Keyboard controls: Left/Right glide, 1/2/3 quick-aim & fire, Space/Enter fire or next
   useEffect(() => {
@@ -337,7 +356,7 @@ export function ShooterGame({
           fireLaserAtX(shipXRef.current)
           return
         }
-        if (phaseRef.current === 'feedback') {
+        if (phaseRef.current === 'feedback' || phaseRef.current === 'celebrate') {
           goNextQuestion()
         }
       }
@@ -515,6 +534,38 @@ export function ShooterGame({
       ctx.beginPath()
       ctx.arc(centerX, podY + podH, isLocked ? 8 : 5.5, 0, Math.PI * 2)
       ctx.fill()
+
+      // Explosive Neon Hit Burst on Correct Shot!
+      if (celebrateBurst && celebrateBurst.lane === box.lane) {
+        ctx.save()
+        ctx.fillStyle = 'rgba(185, 246, 108, 0.24)'
+        ctx.strokeStyle = '#B9F66C'
+        ctx.lineWidth = 4
+        ctx.beginPath()
+        ctx.roundRect(x0 - 4, podY - 4, podW + 8, podH + 8, 16)
+        ctx.fill()
+        ctx.stroke()
+
+        if (!prefs.reduceMotion) {
+          for (let r = 0; r < 10; r += 1) {
+            const ang = (Math.PI * 2 * r) / 10
+            ctx.strokeStyle = r % 2 === 0 ? '#B9F66C' : '#43E7F2'
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.moveTo(centerX + Math.cos(ang) * 28, podY + 62 + Math.sin(ang) * 20)
+            ctx.lineTo(centerX + Math.cos(ang) * 68, podY + 62 + Math.sin(ang) * 48)
+            ctx.stroke()
+          }
+        }
+
+        ctx.font = '900 24px "Paperlogy", sans-serif'
+        ctx.strokeStyle = '#061019'
+        ctx.lineWidth = 5
+        ctx.strokeText('⭕ 정답 명중! +2점!', centerX, podY + podH + 34)
+        ctx.fillStyle = '#B9F66C'
+        ctx.fillText('⭕ 정답 명중! +2점!', centerX, podY + podH + 34)
+        ctx.restore()
+      }
     }
 
     // Fired Laser Beam Effect
@@ -552,7 +603,7 @@ export function ShooterGame({
     ctx.arc(0, -4, 5, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
-  }, [currentScheduled, laserBeam, prefs.reduceMotion, shipX])
+  }, [celebrateBurst, currentScheduled, laserBeam, prefs.reduceMotion, shipX])
 
   const aimRemainingSec = Math.max(0, (aimLimitMs - aimElapsedMs) / 1000).toFixed(1)
   const timerRatio = Math.max(0, Math.min(1, 1 - aimElapsedMs / aimLimitMs))
@@ -708,7 +759,7 @@ export function ShooterGame({
           width={1040}
           height={330}
           onMouseMove={(e) => {
-            if (phase === 'feedback' || tabPaused || practiceCleared) return
+            if (phase !== 'aiming' || tabPaused || practiceCleared) return
             const rect = e.currentTarget.getBoundingClientRect()
             const normX = Math.min(0.94, Math.max(0.06, (e.clientX - rect.left) / rect.width))
             shipXRef.current = normX
@@ -716,7 +767,7 @@ export function ShooterGame({
           }}
           onClick={(e) => {
             if (tabPaused || practiceCleared) return
-            if (phase === 'feedback') {
+            if (phase === 'feedback' || phase === 'celebrate') {
               goNextQuestion()
               return
             }

@@ -30,6 +30,22 @@ describe('Stage 4B · C.O.R.E. 부스터 런 8종 기믹·페이퍼로지 서체
     expect(css).toContain("font-family: 'Paperlogy'")
     expect(css).not.toContain('Pretendard')
     expect(css).not.toContain('Barlow Condensed')
+
+    // AFK anti-camping balance check: standing completely still in lane 0, 1, or 2 must NEVER auto-clear!
+    for (const fixedLane of [0, 1, 2] as const) {
+      const idleSim = new RunnerSimulation({
+        seed: 2026,
+        mode: 'standard',
+        contentVersion: SAMPLE_CONTENT_V04.contentVersion,
+        isPractice: false,
+      })
+      idleSim.setLane(fixedLane)
+      while (!idleSim.getSnapshot().finished) {
+        idleSim.step(50)
+      }
+      expect(idleSim.getSnapshot().cleared).toBe(false)
+      expect(idleSim.getSnapshot().score).toBeLessThan(10)
+    }
   })
 
   it('하이퍼링(195% 초가속), 스프링 점프대(슈퍼점프), 절연 실드(함정 방어), 감전 쇼크/바리케이드(0% 일시정지), 점착늪(35% 중감속)이 정확히 작동한다', () => {
@@ -132,7 +148,7 @@ describe('Stage 4B · C.O.R.E. 부스터 런 8종 기믹·페이퍼로지 서체
     const login = store.loginWithPersonalCode(SAMPLE_VIRTUAL_CODES.QUICK_TEST, 'pc-runner')
     store.setParticipantNickname(login.sessionToken, '기믹마스터')
 
-    // 3 boosters (6) + 1 hyper_ring (3) + 1 shield (1) + 1 shield-blocked emp_shock (0) - 1emp_shock (-2) + 1 sludge (-1) = 7점 (< 10점 미통과)
+    // 3 boosters (6) + 1 hyper_ring (3) + 1 shield (1) + 1 shield-blocked emp_shock (0) - 1 emp_shock (-3) - 1 sludge (-2) = 5점 (< 10점 미통과)
     const run7 = await store.startGameRun(login.sessionToken, 'runner', 'standard')
     const res7 = await store.finalizeGameRun(login.sessionToken, run7.runId, {
       events: [
@@ -155,7 +171,7 @@ describe('Stage 4B · C.O.R.E. 부스터 런 8종 기믹·페이퍼로지 서체
       activeDurationMs: 20_000,
       endReason: 'time_up',
     })
-    expect(res7.score).toBe(7)
+    expect(res7.score).toBe(5)
     expect(res7.cleared).toBe(false)
     if (res7.actionSummary.kind === 'runner') {
       expect(res7.actionSummary.shieldBlockedCount).toBe(1)
@@ -235,5 +251,12 @@ describe('Stage 4B · C.O.R.E. 부스터 런 8종 기믹·페이퍼로지 서체
     expect(fin4.requiredClearedCount).toBe(4)
     expect(fin4.newlyEarnedBadge).toBe(true)
     expect(fin4.badgeEarned).toBe(true)
+
+    // Verify Grand Prix Total Leaderboard ('total') aggregates all 4 standard best scores!
+    const totalBoard = store.getLeaderboard(login.sessionToken, 'total')
+    expect(totalBoard.gameId).toBe('total')
+    expect(totalBoard.myStanding).not.toBeNull()
+    expect(totalBoard.myStanding?.score).toBe(12 + 16 + 10 + 16) // typing(12) + snake(16) + shooter(10) + runner(16) = 54점!
+    expect(totalBoard.top10[0]?.cleared).toBe(true)
   })
 })

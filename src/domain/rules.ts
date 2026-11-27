@@ -102,7 +102,7 @@ export const GAME_CATALOG: Record<GameId, GameCatalogEntry> = {
     expectedDurationLabel: '60초 (여유 75초)',
     controlsLabel: '←·→ 트랙 이동 · Space 또는 ↑ 점프 (장애물 회피)',
     clearConditionLabel:
-      '10점 이상 통과 (⚡핵심가치 +2·세트 +4, 🚀하이퍼링 +3, 🛡️실드/🔼점프대 +1, 함정 −1~−2점)',
+      '10점 이상 통과 (⚡핵심가치 +2·세트 +4, 🚀하이퍼링 +3, 🛡️실드/🔼점프대 +1, 함정 충돌 −2~−3점·세트초기화)',
     practiceGoalLabel: '달리면서 ⚡핵심가치 부스터 발판 또는 🚀하이퍼 링 1개 획득하기',
     assistedDiffLabel: '주행 시간 60초 → 75초, 기본 달리기 속도 80%로 기믹 확인 여유 확대',
     allowedModes: ['standard', 'assisted'],

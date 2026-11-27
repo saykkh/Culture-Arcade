@@ -73,6 +73,11 @@ export function TypingGame({
   const [combo, setCombo] = useState(0)
   const [surgeActive, setSurgeActive] = useState(false)
   const [practiceCleared, setPracticeCleared] = useState(false)
+  const [laserShot, setLaserShot] = useState<{
+    targetX: number
+    targetY: number
+    text: string
+  } | null>(null)
 
   const inputRef = useRef<HTMLInputElement | null>(null)
   const isComposingRef = useRef(false)
@@ -216,6 +221,18 @@ export function TypingGame({
 
     if (matchedCandidates.length > 0) {
       const target = matchedCandidates[0]!
+      const hitProg = Math.min(1, Math.max(0, (nowMs - target.spawnMs) / target.fallDurationMs))
+      const hitTopPct = 6 + hitProg * 75
+      const hitLeftPct = isPractice ? 50 : 1.5 + target.lane * 24.5 + 11.5
+      if (!prefs.reduceMotion) {
+        setLaserShot({
+          targetX: hitLeftPct,
+          targetY: hitTopPct + 4,
+          text: `+${BASE_ACTION_POINTS}점!`,
+        })
+        window.setTimeout(() => setLaserShot(null), 360)
+      }
+
       clearedSetRef.current.add(target.slotId)
       setClearedSlotIds([...clearedSetRef.current])
       setInputValue('')
@@ -400,6 +417,11 @@ export function TypingGame({
           const leftPct = isPractice ? 25 : 1.5 + slot.lane * 24.5
           const widthPct = isPractice ? 50 : 23
           const nearBottom = progress >= 0.75
+          const typedClean = inputValue.normalize('NFC').trimStart()
+          const isPrefixMatch =
+            typedClean.length >= 1 && slot.displayKo.startsWith(typedClean)
+          const matchedChars = isPrefixMatch ? typedClean.length : 0
+
           return (
             <div
               key={slot.slotId}
@@ -410,25 +432,78 @@ export function TypingGame({
                 width: `${widthPct}%`,
                 padding: '8px 11px',
                 borderRadius: 8,
-                background: nearBottom ? 'rgba(46, 26, 24, 0.95)' : 'rgba(18, 32, 50, 0.94)',
-                border: `1.5px solid ${nearBottom ? 'var(--accent-warn)' : 'var(--accent-select)'}`,
+                background: isPrefixMatch
+                  ? 'rgba(18, 44, 38, 0.96)'
+                  : nearBottom
+                    ? 'rgba(46, 26, 24, 0.95)'
+                    : 'rgba(18, 32, 50, 0.94)',
+                border: `${isPrefixMatch ? '2px' : '1.5px'} solid ${
+                  isPrefixMatch
+                    ? 'var(--accent-clear)'
+                    : nearBottom
+                      ? 'var(--accent-warn)'
+                      : 'var(--accent-select)'
+                }`,
                 color: 'var(--text-primary)',
                 fontSize: 15,
                 fontWeight: 700,
                 lineHeight: 1.35,
                 wordBreak: 'keep-all',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.45)',
+                boxShadow: isPrefixMatch
+                  ? '0 0 18px rgba(185, 246, 108, 0.45)'
+                  : '0 4px 12px rgba(0,0,0,0.45)',
               }}
             >
-              <div>{slot.displayKo}</div>
-              {nearBottom && (
+              <div>
+                {matchedChars > 0 ? (
+                  <>
+                    <span style={{ color: 'var(--accent-clear)', textDecoration: 'underline' }}>
+                      {slot.displayKo.slice(0, matchedChars)}
+                    </span>
+                    <span>{slot.displayKo.slice(matchedChars)}</span>
+                  </>
+                ) : (
+                  slot.displayKo
+                )}
+              </div>
+              {isPrefixMatch ? (
+                <div style={{ fontSize: 11, color: 'var(--accent-clear)', marginTop: 2 }}>
+                  🎯 입력 일치 중 · 완성 후 Enter!
+                </div>
+              ) : nearBottom ? (
                 <div style={{ fontSize: 11, color: 'var(--accent-warn)', marginTop: 2 }}>
                   ▲ 마감 임박
                 </div>
-              )}
+              ) : null}
             </div>
           )
         })}
+
+        {/* Electric Connection Laser Beam on Successful Phrase Submit */}
+        {laserShot && (
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+            }}
+          >
+            <line
+              x1="50"
+              y1="96"
+              x2={laserShot.targetX}
+              y2={laserShot.targetY}
+              stroke="#B9F66C"
+              strokeWidth="0.9"
+            />
+            <circle cx={laserShot.targetX} cy={laserShot.targetY} r="2.6" fill="#43E7F2" />
+          </svg>
+        )}
 
         {/* Bottom Danger Line */}
         <div

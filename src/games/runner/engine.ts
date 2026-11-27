@@ -158,15 +158,13 @@ export function buildRunnerTrack(params: {
   let bonusCounter = 0
   let specialBonusCursor = 0
   let hazardCounter = 0
-  let prevPadLane: LaneIndex = 1
 
-  for (let i = 0; i < 36; i += 1) {
-    const rowZ = 150 + i * 164
+  const lanePhaseOffset = Math.floor(rng() * 3)
+  for (let i = 0; i < 30; i += 1) {
+    const rowZ = 155 + i * 192
     const allLanes: LaneIndex[] = [0, 1, 2]
-    const filteredLanes =
-      i % 2 === 1 ? allLanes.filter((l) => l !== prevPadLane) : allLanes
-    const padLane = filteredLanes[Math.floor(rng() * filteredLanes.length)]!
-    prevPadLane = padLane
+    // Rotate booster pad lanes strictly so camping any single lane never farms free boosters
+    const shiftedPadLane = ((i + lanePhaseOffset + (Math.floor(i / 3) % 3)) % 3) as LaneIndex
 
     const letter = letters[i]!
     const meta = padMetaByLetter.get(letter) ?? {
@@ -178,68 +176,69 @@ export function buildRunnerTrack(params: {
       kind: 'booster',
       id: `pad-${i + 1}`,
       z: rowZ,
-      lane: padLane,
+      lane: shiftedPadLane,
       letter,
       shortLabel: meta.shortLabel,
       fullLabel: meta.fullLabel,
       triggered: false,
     })
 
-    const remainingLanes = allLanes.filter((l) => l !== padLane)
+    const remainingLanes = allLanes.filter((l) => l !== shiftedPadLane)
 
-    // Place diverse Hazards across all 4 hazard types (banana, sludge, barricade, emp_shock)
-    if (hazardCounter < 54) {
+    // Place 2 hazards on the non-booster lanes in alternating patterns so standing AFK in ANY lane hits frequent hazards!
+    for (let hSlot = 0; hSlot < remainingLanes.length; hSlot += 1) {
+      if (hazardCounter >= 56) break
+      if (hSlot === 1 && i % 3 === 0) continue
       hazardCounter += 1
-      const hazardKind = hazardCycle[(i + Math.floor(rng() * 2)) % hazardCycle.length]!
-      const hazLane = remainingLanes[Math.floor(rng() * remainingLanes.length)]!
+      const hazardKind = hazardCycle[(i + hSlot) % hazardCycle.length]!
       entities.push({
         kind: 'hazard',
         id: `haz-${hazardCounter}`,
-        z: rowZ + (rng() < 0.5 ? -14 : 18),
-        lane: hazLane,
+        z: rowZ + (hSlot === 0 ? -12 : 18),
+        lane: remainingLanes[hSlot]!,
         hazardKind,
         triggered: false,
         clearedByJump: false,
         blockedByShield: false,
       })
+    }
 
-      // Every 4th segment, pair a Spring Jump Ramp right in front of an obstacle on the 3rd lane!
-      const thirdLane = remainingLanes.find((l) => l !== hazLane)!
-      if (i % 4 === 2 && bonusCounter < 45 && hazardCounter < 54) {
-        bonusCounter += 1
-        hazardCounter += 1
-        entities.push({
-          kind: 'bonus',
-          id: `bon-${bonusCounter}`,
-          z: rowZ + 62,
-          lane: thirdLane,
-          bonusKind: 'jump_ramp',
-          triggered: false,
-        })
-        entities.push({
-          kind: 'hazard',
-          id: `haz-${hazardCounter}`,
-          z: rowZ + 106,
-          lane: thirdLane,
-          hazardKind: i % 8 === 2 ? 'emp_shock' : 'barricade',
-          triggered: false,
-          clearedByJump: false,
-          blockedByShield: false,
-        })
-      } else if (i % 2 === 1 && bonusCounter < 45) {
-        // Evenly cycle hyper_ring, shield, and jump_ramp across the entire track!
-        bonusCounter += 1
-        const bKind = bonusCycle[specialBonusCursor % bonusCycle.length]!
-        specialBonusCursor += 1
-        entities.push({
-          kind: 'bonus',
-          id: `bon-${bonusCounter}`,
-          z: rowZ + 80,
-          lane: thirdLane,
-          bonusKind: bKind,
-          triggered: false,
-        })
-      }
+    // Mid-segment bonus gadgets (Hyper Ring, Shield, or Spring Jump Ramp + obstacle combo!)
+    if (i % 4 === 2 && bonusCounter < 45 && hazardCounter < 56) {
+      const rampLane = remainingLanes[0]!
+      bonusCounter += 1
+      hazardCounter += 1
+      entities.push({
+        kind: 'bonus',
+        id: `bon-${bonusCounter}`,
+        z: rowZ + 82,
+        lane: rampLane,
+        bonusKind: 'jump_ramp',
+        triggered: false,
+      })
+      entities.push({
+        kind: 'hazard',
+        id: `haz-${hazardCounter}`,
+        z: rowZ + 126,
+        lane: rampLane,
+        hazardKind: i % 8 === 2 ? 'emp_shock' : 'barricade',
+        triggered: false,
+        clearedByJump: false,
+        blockedByShield: false,
+      })
+    } else if (i % 2 === 1 && bonusCounter < 45) {
+      bonusCounter += 1
+      const bKind = bonusCycle[specialBonusCursor % bonusCycle.length]!
+      specialBonusCursor += 1
+      const bonusLane = ((shiftedPadLane + 1) % 3) as LaneIndex
+      entities.push({
+        kind: 'bonus',
+        id: `bon-${bonusCounter}`,
+        z: rowZ + 94,
+        lane: bonusLane,
+        bonusKind: bKind,
+        triggered: false,
+      })
     }
   }
 
@@ -546,6 +545,7 @@ export class RunnerSimulation {
           } else {
             ent.triggered = true
             this.hazardHitCount += 1
+            this.currentSet.clear()
             this.pushEvent({
               type: 'hit_hazard',
               hazardId: ent.id,
@@ -553,27 +553,27 @@ export class RunnerSimulation {
             })
 
             if (ent.hazardKind === 'banana') {
-              this.hazardPenaltyPoints += 1
+              this.hazardPenaltyPoints += 2
               this.slipRemainMs = BANANA_SLIP_MS
               this.boostRemainMs = 0
               this.hyperRemainMs = 0
               effects.slippedOrSludged = 'banana'
               this.statusBanner = {
                 tone: 'slip',
-                text: '🍌 바나나 미끄러짐! 속도 55% 감소 (−1점 · Space 점프로 넘으세요)',
+                text: '🍌 바나나 미끄러짐! 속도 55% 감소 (−2점 · Space 점프로 넘으세요)',
               }
             } else if (ent.hazardKind === 'sludge') {
-              this.hazardPenaltyPoints += 1
+              this.hazardPenaltyPoints += 2
               this.sludgeRemainMs = SLUDGE_SLOW_MS
               this.boostRemainMs = 0
               this.hyperRemainMs = 0
               effects.slippedOrSludged = 'sludge'
               this.statusBanner = {
                 tone: 'slip',
-                text: '🟣 끈적한 점착 타르 늪! 속도 35% 거북이 중감속! (−1점)',
+                text: '🟣 끈적한 점착 타르 늪! 속도 35% 거북이 중감속! (−2점)',
               }
             } else if (ent.hazardKind === 'barricade') {
-              this.hazardPenaltyPoints += 1
+              this.hazardPenaltyPoints += 2
               this.stunStopCount += 1
               this.stunRemainMs = BARRICADE_STUN_MS
               this.boostRemainMs = 0
@@ -581,10 +581,10 @@ export class RunnerSimulation {
               effects.stunnedBy = 'barricade'
               this.statusBanner = {
                 tone: 'stun',
-                text: '🚧 공사 바리케이드 충돌! 잠깐 멈칫했습니다! (−1점 · 점프나 차선 이동으로 회피)',
+                text: '🚧 공사 바리케이드 충돌! 잠깐 멈칫했습니다! (−2점 · 점프나 차선 이동으로 회피)',
               }
             } else if (ent.hazardKind === 'emp_shock') {
-              this.hazardPenaltyPoints += 2
+              this.hazardPenaltyPoints += 3
               this.stunStopCount += 1
               this.stunRemainMs = EMP_SHOCK_STUN_MS
               this.boostRemainMs = 0
@@ -592,7 +592,7 @@ export class RunnerSimulation {
               effects.stunnedBy = 'emp_shock'
               this.statusBanner = {
                 tone: 'stun',
-                text: '⚡ 과전류 쇼크 감전! 0.7초 일시 정지! (−2점 · 옆 트랙으로 피하거나 실드/점프대 활용!)',
+                text: '⚡ 과전류 쇼크 감전! 0.7초 일시 정지! (−3점 · 옆 트랙 회피 또는 실드/점프대 활용!)',
               }
             }
           }

@@ -417,14 +417,16 @@ export function verifyAndScoreRun(params: {
             shieldBlockedCount += 1
           } else {
             hazardHitCount += 1
+            // Unshielded hazard hit disrupts incomplete C·O·R·E combo gauge!
+            currentSet.clear()
             if (ev.hazardKind === 'emp_shock') {
               stunStopCount += 1
-              hazardPenaltyPoints += 2
+              hazardPenaltyPoints += 3
             } else if (ev.hazardKind === 'barricade') {
               stunStopCount += 1
-              hazardPenaltyPoints += 1
+              hazardPenaltyPoints += 2
             } else {
-              hazardPenaltyPoints += 1
+              hazardPenaltyPoints += 2
             }
           }
         } else {

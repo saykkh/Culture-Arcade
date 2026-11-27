@@ -152,7 +152,7 @@ function formatResultFeedback(
         nextActionTip,
         commentaryLines: [
           `도움 기믹 4종: ⚡핵심가치 발판(+2점·가속, 4종 세트 +4점), 🚀하이퍼 링(+3점·195% 초가속), 🛡️절연 실드(+1점·방어 ${curr.shieldBlockedCount}회 성공), 🔼스프링 점프대(+1점·슈퍼점프)`,
-          `방해 기믹 4종: 🍌바나나(−1점·감속), 🟣점착 늪(−1점·중감속), 🚧바리케이드(−1점·멈칫), ⚡과전류 쇼크(−2점·0.7초 일시정지)`,
+          `방해 기믹 4종: 🍌바나나(−2점·감속), 🟣점착 늪(−2점·중감속), 🚧바리케이드(−2점·멈칫), ⚡과전류 쇼크(−3점·일시정지, 피격 시 미완성 세트 초기화)`,
           `핵심가치 복습: C(${bundle.records['core-c']?.display_ko}) · O(${bundle.records['core-o']?.display_ko}) · R(${bundle.records['core-r']?.display_ko}) · E(${bundle.records['core-e']?.display_ko})`,
         ],
       }
