@@ -51,10 +51,17 @@ export interface ShooterActionSummary {
   missedShots: number
 }
 
+export type RunnerBonusKind = 'hyper_ring' | 'shield' | 'jump_ramp'
+
+export type RunnerHazardKind = 'banana' | 'sludge' | 'barricade' | 'emp_shock'
+
 export interface RunnerActionSummary {
   kind: 'runner'
   boostCount: number
-  bananaSlipCount: number
+  bonusItemCount: number
+  hazardHitCount: number
+  stunStopCount: number
+  shieldBlockedCount: number
   completedCoreSets: number
   collectedLetters: CoreValueCode[]
 }
@@ -136,9 +143,17 @@ export type RunnerRunEvent =
   | {
       seq: number
       t_ms: number
+      type: 'collect_bonus'
+      bonusId: string
+      bonusKind: RunnerBonusKind
+    }
+  | {
+      seq: number
+      t_ms: number
       type: 'hit_hazard'
       hazardId: string
-      hazardKind: 'banana' | 'barrier'
+      hazardKind: RunnerHazardKind
+      blockedByShield?: boolean
     }
 
 export type GameRunEvent =

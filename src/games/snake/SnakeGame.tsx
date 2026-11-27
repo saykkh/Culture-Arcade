@@ -543,7 +543,7 @@ export function SnakeGame({
     ctx.fill()
 
     // Integrated Neon Word Capsules right at each candidate cell!
-    ctx.font = '800 15px Pretendard, "Malgun Gothic", sans-serif'
+    ctx.font = '800 15px "Paperlogy", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 

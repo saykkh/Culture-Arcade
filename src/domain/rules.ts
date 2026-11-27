@@ -95,14 +95,16 @@ export const GAME_CATALOG: Record<GameId, GameCatalogEntry> = {
     shortTitle: '부스터 런',
     socketIndex: 3,
     accentColor: '#FF6B9E',
-    cardTagline: '핵심가치 발판을 밟아 부스터 질주! 바나나 함정은 피하거나 점프하세요!',
-    howToPlayOneLine: '3트랙을 달리며 ⚡핵심가치 부스터(+2점)는 밟고, 🍌바나나 껍질(−1점·감속)은 피하거나 점프합니다.',
-    summaryLine: '60초 · ←→ 차선 이동 + Space/↑ 점프 · 10점 달성 시 통과 (부스터 +2점)',
+    cardTagline: '핵심가치·하이퍼링·실드·점프대 총출동! 바나나·점착늪·감전 정지 함정을 돌파하세요!',
+    howToPlayOneLine:
+      '⚡핵심가치 발판(+2)·🚀하이퍼링(+3)·🛡️실드·🔼점프대를 활용하고, 🍌바나나·🟣점착늪(감속)·🚧바리케이드·⚡쇼크(일시정지)를 피하세요.',
+    summaryLine: '60초 · ←→ 차선 이동 + Space/↑ 점프 · 8종 기믹 트랙 · 10점 통과',
     expectedDurationLabel: '60초 (여유 75초)',
-    controlsLabel: '←·→ 트랙 이동 · Space 또는 ↑ 점프 (바나나 회피)',
-    clearConditionLabel: '10점 이상 통과 (⚡핵심가치 발판 +2점, C·O·R·E 세트 +4점, 🍌바나나 −1점)',
-    practiceGoalLabel: '달리면서 ⚡핵심가치 부스터 발판 1개 밟기',
-    assistedDiffLabel: '주행 시간 60초 → 75초, 기본 달리기 속도 80%로 장애물 확인 여유 확대',
+    controlsLabel: '←·→ 트랙 이동 · Space 또는 ↑ 점프 (장애물 회피)',
+    clearConditionLabel:
+      '10점 이상 통과 (⚡핵심가치 +2·세트 +4, 🚀하이퍼링 +3, 🛡️실드/🔼점프대 +1, 함정 −1~−2점)',
+    practiceGoalLabel: '달리면서 ⚡핵심가치 부스터 발판 또는 🚀하이퍼 링 1개 획득하기',
+    assistedDiffLabel: '주행 시간 60초 → 75초, 기본 달리기 속도 80%로 기믹 확인 여유 확대',
     allowedModes: ['standard', 'assisted'],
   },
 }

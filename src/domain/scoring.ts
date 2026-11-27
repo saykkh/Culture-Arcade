@@ -363,14 +363,25 @@ export function verifyAndScoreRun(params: {
     }
 
     case 'runner': {
-      const allowedPads = new Set(Array.from({ length: 40 }, (_, i) => `pad-${i + 1}`))
-      const allowedHazards = new Set(Array.from({ length: 30 }, (_, i) => `haz-${i + 1}`))
+      const allowedPads = new Set(Array.from({ length: 50 }, (_, i) => `pad-${i + 1}`))
+      const allowedBonuses = new Set(Array.from({ length: 50 }, (_, i) => `bon-${i + 1}`))
+      const allowedHazards = new Set(Array.from({ length: 60 }, (_, i) => `haz-${i + 1}`))
+      const validBonusKinds = new Set(['hyper_ring', 'shield', 'jump_ramp'])
+      const validHazardKinds = new Set(['banana', 'sludge', 'barricade', 'emp_shock'])
+
       const usedPads = new Set<string>()
+      const usedBonuses = new Set<string>()
       const usedHazards = new Set<string>()
       const currentSet = new Set<CoreValueCode>()
       const everCollected = new Set<CoreValueCode>()
+
       let boostCount = 0
-      let bananaSlipCount = 0
+      let bonusItemCount = 0
+      let bonusPoints = 0
+      let hazardHitCount = 0
+      let stunStopCount = 0
+      let shieldBlockedCount = 0
+      let hazardPenaltyPoints = 0
       let completedCoreSets = 0
 
       for (const rawEv of events) {
@@ -388,20 +399,44 @@ export function verifyAndScoreRun(params: {
             completedCoreSets += 1
             currentSet.clear()
           }
+        } else if (ev.type === 'collect_bonus') {
+          if (!allowedBonuses.has(ev.bonusId) || !validBonusKinds.has(ev.bonusKind)) {
+            throw new RunVerificationError('INVALID_BONUS_ITEM', 'Invalid runner bonus item.')
+          }
+          if (usedBonuses.has(ev.bonusId)) continue
+          usedBonuses.add(ev.bonusId)
+          bonusItemCount += 1
+          bonusPoints += ev.bonusKind === 'hyper_ring' ? 3 : 1
         } else if (ev.type === 'hit_hazard') {
-          if (!allowedHazards.has(ev.hazardId)) {
+          if (!allowedHazards.has(ev.hazardId) || !validHazardKinds.has(ev.hazardKind)) {
             throw new RunVerificationError('INVALID_HAZARD', 'Invalid runner hazard.')
           }
           if (usedHazards.has(ev.hazardId)) continue
           usedHazards.add(ev.hazardId)
-          bananaSlipCount += 1
+          if (ev.blockedByShield) {
+            shieldBlockedCount += 1
+          } else {
+            hazardHitCount += 1
+            if (ev.hazardKind === 'emp_shock') {
+              stunStopCount += 1
+              hazardPenaltyPoints += 2
+            } else if (ev.hazardKind === 'barricade') {
+              stunStopCount += 1
+              hazardPenaltyPoints += 1
+            } else {
+              hazardPenaltyPoints += 1
+            }
+          }
         } else {
           throw new RunVerificationError('INVALID_EVENT_TYPE', 'Unexpected runner event.')
         }
       }
 
       const rawScore =
-        boostCount * BASE_ACTION_POINTS + completedCoreSets * 4 - bananaSlipCount * 1
+        boostCount * BASE_ACTION_POINTS +
+        completedCoreSets * 4 +
+        bonusPoints -
+        hazardPenaltyPoints
       const score = Math.max(0, rawScore)
       const cleared = score >= PASSING_SCORE
       return {
@@ -411,7 +446,10 @@ export function verifyAndScoreRun(params: {
         actionSummary: {
           kind: 'runner',
           boostCount,
-          bananaSlipCount,
+          bonusItemCount,
+          hazardHitCount,
+          stunStopCount,
+          shieldBlockedCount,
           completedCoreSets,
           collectedLetters: [...everCollected],
         },

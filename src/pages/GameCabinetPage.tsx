@@ -135,23 +135,25 @@ function formatResultFeedback(
       const prevBoosts = prev?.kind === 'runner' ? prev.boostCount : null
       const diff = prevBoosts !== null ? curr.boostCount - prevBoosts : null
       const achievedHeadline = result.cleared
-        ? `⚡부스터 발판 ${curr.boostCount}회 · C·O·R·E ${curr.completedCoreSets}세트 (${result.score}점) · 통과!`
+        ? `⚡핵심가치 ${curr.boostCount}회 · 특수기믹 ${curr.bonusItemCount}개 · 세트 ${curr.completedCoreSets}회 (${result.score}점) · 통과!`
         : `현재 ${result.score}점 (부스터 ${curr.boostCount}회) · ${Math.max(1, PASSING_SCORE - result.score)}점 더 획득하면 통과!`
       const nextActionTip =
-        curr.bananaSlipCount > 0
-          ? `🍌바나나 미끄러짐 ${curr.bananaSlipCount}회(회당 −1점·감속)가 있었습니다! 바나나는 ←·→ 차선 이동으로 피하거나 Space 점프로 뛰어넘으세요.`
-          : 'C·O·R·E 네 글자 발판을 골고루 밟아 4종 세트를 완성할 때마다 +4점 슈퍼 부스터 보너스가 추가됩니다!'
+        curr.stunStopCount > 0
+          ? `🚧바리케이드·⚡과전류 쇼크 일시정지(${curr.stunStopCount}회)가 있었습니다! 쇼크 게이트는 옆 트랙으로 피하거나 🛡️보호실드·🔼점프대 슈퍼점프로 돌파하세요.`
+          : curr.hazardHitCount > 0
+            ? `감속 함정(${curr.hazardHitCount}회)을 Space 점프로 넘고, 🚀초전도 하이퍼 링(+3점·초가속)과 🛡️실드를 챙기면 점수가 훨씬 빠르게 오릅니다!`
+            : 'C·O·R·E 4종 세트(+4점)와 🚀초전도 하이퍼 링(+3점)을 연속으로 이어 최고 기록에 도전해 보세요!'
       return {
         achievedHeadline,
         deltaText:
           diff !== null
-            ? `같은 모드 직전 기록 대비 부스터 발판 ${diff >= 0 ? `+${diff}` : diff}회`
+            ? `같은 모드 직전 기록 대비 핵심가치 발판 ${diff >= 0 ? `+${diff}` : diff}회`
             : null,
         nextActionTip,
         commentaryLines: [
-          `배점 규칙: ⚡핵심가치 부스터 발판 +2점, C·O·R·E 4종 세트 완성 +4점, 🍌바나나 미끄러짐 −1점 (10점 달성 시 통과)`,
-          `C(${bundle.records['core-c']?.display_ko}) · O(${bundle.records['core-o']?.display_ko})`,
-          `R(${bundle.records['core-r']?.display_ko}) · E(${bundle.records['core-e']?.display_ko})`,
+          `도움 기믹 4종: ⚡핵심가치 발판(+2점·가속, 4종 세트 +4점), 🚀하이퍼 링(+3점·195% 초가속), 🛡️절연 실드(+1점·방어 ${curr.shieldBlockedCount}회 성공), 🔼스프링 점프대(+1점·슈퍼점프)`,
+          `방해 기믹 4종: 🍌바나나(−1점·감속), 🟣점착 늪(−1점·중감속), 🚧바리케이드(−1점·멈칫), ⚡과전류 쇼크(−2점·0.7초 일시정지)`,
+          `핵심가치 복습: C(${bundle.records['core-c']?.display_ko}) · O(${bundle.records['core-o']?.display_ko}) · R(${bundle.records['core-r']?.display_ko}) · E(${bundle.records['core-e']?.display_ko})`,
         ],
       }
     }

@@ -56,15 +56,22 @@ export function CabinetArtwork({ gameId }: { gameId: GameId }) {
       return (
         <svg viewBox="0 0 280 88" width="100%" height="100%" aria-hidden="true">
           <rect width="280" height="88" fill="#090d19" />
-          <polygon points="106,14 174,14 256,88 24,88" fill="#132036" stroke="#43E7F2" strokeOpacity="0.6" />
-          <line x1="128" y1="14" x2="98" y2="88" stroke="#43E7F2" strokeOpacity="0.4" strokeDasharray="5 4" />
-          <line x1="152" y1="14" x2="182" y2="88" stroke="#43E7F2" strokeOpacity="0.4" strokeDasharray="5 4" />
-          <rect x="112" y="34" width="56" height="16" rx="4" fill="#132c24" stroke="#B9F66C" strokeWidth="1.8" />
-          <text x="140" y="45" fill="#B9F66C" fontSize="9.5" fontWeight="800" textAnchor="middle">⚡C·부스터</text>
-          <ellipse cx="204" cy="58" rx="16" ry="8" fill="#3a2f10" stroke="#FFE047" />
-          <text x="204" y="61" fill="#FFE047" fontSize="9.5" fontWeight="800" textAnchor="middle">🍌감속</text>
-          <rect x="128" y="60" width="24" height="18" rx="5" fill="#FF6B9E" />
-          <circle cx="140" cy="54" r="6" fill="#F2F6FB" />
+          <polygon points="106,12 174,12 258,88 22,88" fill="#132036" stroke="#43E7F2" strokeOpacity="0.6" />
+          <line x1="128" y1="12" x2="96" y2="88" stroke="#43E7F2" strokeOpacity="0.4" strokeDasharray="5 4" />
+          <line x1="152" y1="12" x2="184" y2="88" stroke="#43E7F2" strokeOpacity="0.4" strokeDasharray="5 4" />
+          <circle cx="88" cy="36" r="11" fill="none" stroke="#FF6B9E" strokeWidth="2.4" />
+          <text x="88" y="21" fill="#FF9EC2" fontSize="8.5" fontWeight="800" textAnchor="middle">🚀하이퍼</text>
+          <rect x="114" y="34" width="52" height="15" rx="4" fill="#132c24" stroke="#B9F66C" strokeWidth="1.8" />
+          <text x="140" y="44" fill="#B9F66C" fontSize="9" fontWeight="800" textAnchor="middle">⚡C·부스터</text>
+          <rect x="184" y="28" width="44" height="16" rx="3" fill="#38121a" stroke="#FF6B7A" strokeWidth="1.6" />
+          <text x="206" y="39" fill="#FF9AA5" fontSize="8.5" fontWeight="800" textAnchor="middle">⚡쇼크정지</text>
+          <ellipse cx="74" cy="64" rx="18" ry="8" fill="#4b247a" stroke="#C084FC" />
+          <text x="74" y="67" fill="#E9D5FF" fontSize="8.5" fontWeight="700" textAnchor="middle">🟣점착늪</text>
+          <ellipse cx="208" cy="64" rx="16" ry="8" fill="#3a2f10" stroke="#FFE047" />
+          <text x="208" y="67" fill="#FFE047" fontSize="8.5" fontWeight="800" textAnchor="middle">🍌바나나</text>
+          <circle cx="140" cy="64" r="16" fill="rgba(67,231,242,0.15)" stroke="#43E7F2" strokeWidth="1.5" />
+          <rect x="130" y="58" width="20" height="16" rx="5" fill="#FF6B9E" />
+          <circle cx="140" cy="52" r="5.5" fill="#F2F6FB" />
         </svg>
       )
   }

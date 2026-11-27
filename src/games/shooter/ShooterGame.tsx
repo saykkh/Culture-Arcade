@@ -491,7 +491,7 @@ export function ShooterGame({
       ctx.fill()
 
       ctx.fillStyle = isLocked ? '#07121c' : '#A6B4C8'
-      ctx.font = '800 12px Pretendard, "Malgun Gothic", sans-serif'
+      ctx.font = '800 12px "Paperlogy", sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText(
@@ -502,12 +502,12 @@ export function ShooterGame({
 
       // Core Value Letter + Korean Name
       ctx.fillStyle = isLocked ? accent : '#F2F6FB'
-      ctx.font = '800 20px Pretendard, "Malgun Gothic", sans-serif'
+      ctx.font = '800 20px "Paperlogy", sans-serif'
       ctx.fillText(opt.labelKo, centerX, podY + 62)
 
       // English Subtitle
       ctx.fillStyle = '#9FB0C7'
-      ctx.font = '600 13px Pretendard, "Malgun Gothic", sans-serif'
+      ctx.font = '600 13px "Paperlogy", sans-serif'
       ctx.fillText(opt.labelEn, centerX, podY + 92)
 
       // Bottom Bullseye Connector Node
