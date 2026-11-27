@@ -272,13 +272,11 @@ export async function handleApiRequest(
         events?: GameRunEvent[]
         activeDurationMs?: number
         endReason?: RunEndReason
-        renderMode?: '3d' | 'simplified' | 'panel-list'
       }
       const finalized = await store.finalizeGameRun(cookies[PARTICIPANT_COOKIE_NAME], runId, {
         events: Array.isArray(body.events) ? body.events : [],
         activeDurationMs: Number(body.activeDurationMs ?? 0),
         endReason: (body.endReason ?? 'time_up') as RunEndReason,
-        renderMode: body.renderMode,
       })
       return jsonResponse(200, finalized, withSyncCookie(cookies[PARTICIPANT_COOKIE_NAME]))
     }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArcadeHeader } from '../components/ArcadeHeader'
 import { CabinetArtwork } from '../components/CabinetArtwork'
-import { ALL_GAME_IDS, GAME_CATALOG } from '../domain/rules'
+import { ALL_GAME_IDS, GAME_CATALOG, REQUIRED_GAME_ORDER } from '../domain/rules'
 import type { GameId } from '../domain/types'
 import {
   arcadeApi,
@@ -39,7 +39,7 @@ export function ArcadeLobbyPage({
   const [pendingError, setPendingError] = useState<string | null>(null)
   const [showBadgeSummary, setShowBadgeSummary] = useState(false)
 
-  // Keyboard navigation across 3 cols x 2 rows
+  // Keyboard navigation across 2 cols x 2 rows
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName
@@ -62,11 +62,11 @@ export function ArcadeLobbyPage({
       } else if (e.key === 'ArrowDown') {
         e.preventDefault()
         playArcadeSfx('select')
-        setSelectedIndex((prev) => (prev + 3) % ALL_GAME_IDS.length)
+        setSelectedIndex((prev) => (prev + 2) % ALL_GAME_IDS.length)
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         playArcadeSfx('select')
-        setSelectedIndex((prev) => (prev - 3 + ALL_GAME_IDS.length) % ALL_GAME_IDS.length)
+        setSelectedIndex((prev) => (prev - 2 + ALL_GAME_IDS.length) % ALL_GAME_IDS.length)
       } else if (e.key === 'Enter' && tag !== 'BUTTON') {
         e.preventDefault()
         const targetId = ALL_GAME_IDS[selectedIndex]!
@@ -92,7 +92,6 @@ export function ArcadeLobbyPage({
         events: pendingRetry.events,
         activeDurationMs: pendingRetry.activeDurationMs,
         endReason: pendingRetry.endReason,
-        renderMode: pendingRetry.renderMode,
       })
       clearPendingSubmission()
       setPendingRetry(null)
@@ -114,7 +113,6 @@ export function ArcadeLobbyPage({
         onLogout={() => void onLogout()}
       />
 
-      {/* Pending unconfirmed submission recovery banner */}
       {pendingRetry && (
         <div className="status-alert warn" style={{ justifyContent: 'space-between' }}>
           <span>
@@ -144,7 +142,7 @@ export function ArcadeLobbyPage({
         </div>
       )}
 
-      {/* Lobby Status Strip: Progress, Due Date, Next Action */}
+      {/* Lobby Status Strip: Clear Participant Progress & Recommended Action */}
       <section className="lobby-status-bar" aria-label="개인 진도 및 다음 행동 안내">
         <div className="lobby-recommendation">
           <div>
@@ -160,9 +158,9 @@ export function ArcadeLobbyPage({
             참가자: <strong>{me.nickname}</strong>
           </span>
           <span>
-            필수 진도:{' '}
+            케이블 진도:{' '}
             <strong className="mono-num" style={{ color: 'var(--accent-clear)' }}>
-              {me.requiredClearedCount}/5
+              {me.requiredClearedCount}/{REQUIRED_GAME_ORDER.length}
             </strong>
           </span>
           {me.recommendedDueDate && (
@@ -189,7 +187,7 @@ export function ArcadeLobbyPage({
                   onNavigate(`/games/${me.recommendation.targetGameId}`)
                 }}
               >
-                추천 기기 바로 입장 ▶
+                추천 게임 바로 시작 ▶
               </button>
             )
           )}
@@ -199,7 +197,7 @@ export function ArcadeLobbyPage({
       {showBadgeSummary && me.badgeEarned && (
         <section className="status-alert clear" style={{ justifyContent: 'space-between' }}>
           <div>
-            <strong>★ LS전선 WAY ARCADE 온보딩 배지 지급 완료</strong> · 필수 5종 케이블이 모두 연결되었습니다! 원하는 기기에 다시 도전해 정규 모드 TOP 10 기록을 경신하거나 보너스 관제실을 탐색해 보세요.
+            <strong>★ LS전선 WAY ARCADE 온보딩 배지 지급 완료</strong> · 4종 게임 케이블이 모두 연결되었습니다! 각 게임에서 10점 통과를 넘어 최고 점수 TOP 10에 도전해 보세요.
           </div>
           <button
             type="button"
@@ -211,8 +209,8 @@ export function ArcadeLobbyPage({
         </section>
       )}
 
-      {/* 3x2 Electronic Arcade Cabinet Grid */}
-      <main className="lobby-grid" aria-label="오락기 선택 (방향키 이동, Enter 입장)">
+      {/* 2x2 Electronic Arcade Cabinet Grid */}
+      <main className="lobby-grid" aria-label="4종 오락기 선택 (방향키 이동, 클릭 또는 Enter 입장)">
         {ALL_GAME_IDS.map((gid, index) => {
           const meta = GAME_CATALOG[gid]
           const prog = me.games.find((g) => g.gameId === gid)
@@ -255,46 +253,50 @@ export function ArcadeLobbyPage({
                 }
               }}
             >
-              {/* Unselected cabinets strictly display ONLY name, scene, required/bonus, and completion status */}
               <div className="cabinet-top-row">
-                <span className={`cabinet-badge-type ${meta.category === 'bonus' ? 'bonus' : ''}`}>
-                  {meta.category === 'required' ? `필수 #${(meta.socketIndex ?? 0) + 1}` : '보너스'}
+                <span className="cabinet-badge-type">
+                  STAGE #{meta.socketIndex + 1}
                 </span>
 
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   {isFirstRecommend && (
                     <span className="cabinet-status-tag recommend">★ 첫 판 추천</span>
                   )}
                   {isNextRecommend && !isFirstRecommend && (
                     <span className="cabinet-status-tag recommend">▶ 다음 추천</span>
                   )}
-                  {isCleared && (
+                  {isCleared ? (
                     <span className="cabinet-status-tag cleared">
-                      ✓ {meta.category === 'bonus' ? '관제등 완료' : '케이블 연결됨'}
+                      ✓ 통과 완료 ({prog?.standardBestScore ?? prog?.assistedBestScore ?? 10}점)
                     </span>
+                  ) : (
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>10점 통과</span>
                   )}
                 </div>
               </div>
 
-              <div className="cabinet-scene-preview">
+              <div className="cabinet-scene-preview" style={{ height: 96 }}>
                 <CabinetArtwork gameId={gid} />
               </div>
 
-              <div className="cabinet-bottom-row">
-                <span className="cabinet-title">{meta.title}</span>
-                {isSelected && (
+              <div style={{ display: 'grid', gap: 4 }}>
+                <div className="cabinet-bottom-row">
+                  <span className="cabinet-title">{meta.title}</span>
                   <button
                     type="button"
-                    className="btn-arcade btn-compact btn-start"
+                    className={`btn-arcade btn-compact ${isSelected ? 'btn-start' : ''}`}
                     onClick={(e) => {
                       e.stopPropagation()
                       playArcadeSfx('start')
                       onNavigate(`/games/${gid}`)
                     }}
                   >
-                    START ▶
+                    {isCleared ? '고득점 재도전 ▶' : '게임 입장 ▶'}
                   </button>
-                )}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  {meta.cardTagline}
+                </div>
               </div>
             </div>
           )
@@ -308,21 +310,15 @@ export function ArcadeLobbyPage({
             [{selectedMeta.title}]
           </strong>
           <div className="detail-spec-item">
-            <span className="detail-spec-label">예상·조작·목표:</span>
-            <span>{selectedMeta.summaryLine}</span>
+            <span className="detail-spec-label">하는 법:</span>
+            <span>{selectedMeta.howToPlayOneLine}</span>
           </div>
           <div className="detail-spec-item">
-            <span className="detail-spec-label">개인 기록:</span>
-            {selectedMeta.category === 'bonus' ? (
-              <span className="mono-num">
-                {selectedProg?.cleared ? '보너스 탈출 완료' : '미완료'}
-              </span>
-            ) : (
-              <span className="mono-num">
-                기본 최고 {selectedProg?.standardBestScore ?? '-'}점 · 여유 최고{' '}
-                {selectedProg?.assistedBestScore ?? '-'}점 · 확정 {selectedProg?.finalizedAttemptCount ?? 0}회
-              </span>
-            )}
+            <span className="detail-spec-label">내 최고 기록:</span>
+            <span className="mono-num">
+              기본 {selectedProg?.standardBestScore ?? '-'}점 · 여유{' '}
+              {selectedProg?.assistedBestScore ?? '-'}점 ({selectedProg?.finalizedAttemptCount ?? 0}회)
+            </span>
           </div>
         </div>
 
@@ -338,7 +334,7 @@ export function ArcadeLobbyPage({
               onNavigate(`/games/${selectedGameId}`)
             }}
           >
-            {selectedMeta.title} 입장 ▶
+            {selectedMeta.title} START ▶
           </button>
         </div>
       </footer>

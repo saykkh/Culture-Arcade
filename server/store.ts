@@ -9,7 +9,6 @@ import {
 import { computeLobbyRecommendation } from '../src/domain/recommendation.js'
 import {
   ALL_GAME_IDS,
-  BONUS_GAME_ID,
   computeParticipantDueStatus,
   computeParticipantLearningStatus,
   CURRENT_LEARNING_VERSION_ID,
@@ -108,7 +107,6 @@ export interface StoredGameRun {
   expiresAt: string
   finalizedAt: string | null
   endReason: RunEndReason | null
-  renderMode: '3d' | 'simplified' | 'panel-list' | null
   activeDurationMs: number | null
   score: number | null
   cleared: boolean | null
@@ -119,7 +117,7 @@ export interface StoredGameRun {
 export interface StoredFirstItemResponse {
   participantId: string
   contentVersion: string
-  gameId: 'shooter' | 'control-room'
+  gameId: 'shooter'
   itemId: string
   firstOutcome: FirstExposureOutcome
   isCorrect: boolean | null
@@ -150,11 +148,9 @@ export interface FinalizeRunResult {
   standardBestScore: number | null
   assistedBestScore: number | null
   newlyLitSocket: boolean
-  newlyLitControlLamp: boolean
   newlyEarnedBadge: boolean
   requiredClearedCount: number
   badgeEarned: boolean
-  controlLampLit: boolean
   litSockets: Record<string, boolean>
   recommendation: RecommendationBanner
 }
@@ -335,7 +331,7 @@ export class ArcadeStore {
     if (this.filePath && existsSync(this.filePath)) {
       try {
         const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as DatabaseState
-        this.state = parsed
+        this.state = this.upgradeLoadedState(parsed)
         if (!this.requireApprovedContent) {
           this.ensureQuickTestParticipant()
         }
@@ -346,6 +342,33 @@ export class ArcadeStore {
     } else {
       this.state = createInitialState(this.requireApprovedContent)
       this.persist()
+    }
+  }
+
+  private upgradeLoadedState(parsed: DatabaseState): DatabaseState {
+    const defaultLv: LearningVersionRecord = {
+      id: CURRENT_LEARNING_VERSION_ID,
+      ruleVersion: CURRENT_RULE_VERSION,
+      contentVersion: DEFAULT_PILOT_CONTENT_VERSION,
+      publishedAt: '2026-11-26T00:00:00.000Z',
+    }
+    const learningVersions = Array.isArray(parsed.learningVersions) ? parsed.learningVersions : []
+    if (!learningVersions.some((v) => v.id === defaultLv.id)) {
+      learningVersions.unshift(defaultLv)
+    }
+    return {
+      learningVersions,
+      participants: Array.isArray(parsed.participants) ? parsed.participants : [],
+      credentials: Array.isArray(parsed.credentials) ? parsed.credentials : [],
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+      runs: (Array.isArray(parsed.runs) ? parsed.runs : []).filter((r) => isValidGameId(r.gameId)),
+      progress: (Array.isArray(parsed.progress) ? parsed.progress : []).filter((r) =>
+        isValidGameId(r.gameId),
+      ),
+      firstItemResponses: (Array.isArray(parsed.firstItemResponses)
+        ? parsed.firstItemResponses
+        : []
+      ).filter((r) => r.gameId === 'shooter'),
     }
   }
 
@@ -687,7 +710,7 @@ export class ArcadeStore {
     }
 
     for (const incoming of sync.prog) {
-      if (incoming.participantId !== p.id) continue
+      if (incoming.participantId !== p.id || !isValidGameId(incoming.gameId)) continue
       const cur = this.getOrCreateProgress(p.id, incoming.gameId)
       if (
         incoming.standardBestScore !== null &&
@@ -716,7 +739,11 @@ export class ArcadeStore {
       }
     }
 
-    if (sync.activeRun && !this.state.runs.some((r) => r.id === sync.activeRun!.id)) {
+    if (
+      sync.activeRun &&
+      isValidGameId(sync.activeRun.gameId) &&
+      !this.state.runs.some((r) => r.id === sync.activeRun!.id)
+    ) {
       this.state.runs.push({
         id: sync.activeRun.id,
         participantId: p.id,
@@ -732,7 +759,6 @@ export class ArcadeStore {
         expiresAt: sync.activeRun.expiresAt,
         finalizedAt: null,
         endReason: null,
-        renderMode: null,
         activeDurationMs: null,
         score: null,
         cleared: null,
@@ -808,7 +834,9 @@ export class ArcadeStore {
     const participant = this.authenticateParticipantSession(token)
     const now = this.clock()
     const available = isAvailableOnKst(participant.availableFromDate, now)
-    const lv = this.state.learningVersions.find((v) => v.id === participant.learningVersionId)!
+    const lv =
+      this.state.learningVersions.find((v) => v.id === participant.learningVersionId) ??
+      this.state.learningVersions[0]!
     const bundle = getContentBundle(lv.contentVersion)
     const progressByGame = this.getProgressMap(participant.id)
 
@@ -819,7 +847,6 @@ export class ArcadeStore {
       litSockets[gid] = lit
       if (lit) requiredClearedCount += 1
     }
-    const controlLampLit = Boolean(progressByGame[BONUS_GAME_ID]?.firstClearedAt)
     const badgeEarned = Boolean(participant.onboardingCompletedAt)
     const recommendation = computeLobbyRecommendation(progressByGame)
 
@@ -829,7 +856,6 @@ export class ArcadeStore {
       return {
         gameId: gid,
         title: meta.title,
-        category: meta.category,
         allowedModes: meta.allowedModes,
         standardBestScore: prog?.standardBestScore ?? null,
         assistedBestScore: prog?.assistedBestScore ?? null,
@@ -854,7 +880,6 @@ export class ArcadeStore {
       sampleNotice: bundle.sampleNotice,
       requiredClearedCount,
       badgeEarned,
-      controlLampLit,
       litSockets,
       recommendation,
       games,
@@ -901,7 +926,9 @@ export class ArcadeStore {
     }
 
     return this.withLock(`participant:${participant.id}`, () => {
-      const lv = this.state.learningVersions.find((v) => v.id === participant.learningVersionId)!
+      const lv =
+        this.state.learningVersions.find((v) => v.id === participant.learningVersionId) ??
+        this.state.learningVersions[0]!
       const prog = this.getOrCreateProgress(participant.id, gameId)
       const hadPreviousStart =
         prog.lastStartedAt !== null ||
@@ -942,7 +969,6 @@ export class ArcadeStore {
         expiresAt,
         finalizedAt: null,
         endReason: null,
-        renderMode: null,
         activeDurationMs: null,
         score: null,
         cleared: null,
@@ -973,7 +999,6 @@ export class ArcadeStore {
       events: GameRunEvent[]
       activeDurationMs: number
       endReason: RunEndReason
-      renderMode?: '3d' | 'simplified' | 'panel-list'
     },
   ): Promise<FinalizeRunResult> {
     const participant = this.authenticateParticipantSession(token)
@@ -1008,7 +1033,6 @@ export class ArcadeStore {
           events: payload.events,
           activeDurationMs: payload.activeDurationMs,
           endReason: payload.endReason,
-          renderMode: payload.renderMode,
         })
       } catch (err) {
         if (err instanceof RunVerificationError) {
@@ -1046,13 +1070,10 @@ export class ArcadeStore {
       }
 
       let newlyLitSocket = false
-      let newlyLitControlLamp = false
       if (verified.cleared && !prog.firstClearedAt) {
         prog.firstClearedAt = finalizedAt
         if (isRequiredGameId(run.gameId)) {
           newlyLitSocket = true
-        } else {
-          newlyLitControlLamp = true
         }
       }
 
@@ -1120,11 +1141,9 @@ export class ArcadeStore {
         standardBestScore: prog.standardBestScore,
         assistedBestScore: prog.assistedBestScore,
         newlyLitSocket,
-        newlyLitControlLamp,
         newlyEarnedBadge,
         requiredClearedCount,
         badgeEarned: Boolean(participant.onboardingCompletedAt),
-        controlLampLit: Boolean(progressByGame[BONUS_GAME_ID]?.firstClearedAt),
         litSockets,
         recommendation,
       }
@@ -1132,7 +1151,6 @@ export class ArcadeStore {
       run.status = 'finalized'
       run.finalizedAt = finalizedAt
       run.endReason = payload.endReason
-      run.renderMode = payload.renderMode ?? null
       run.activeDurationMs = verified.activeDurationMs
       run.score = verified.score
       run.cleared = verified.cleared
@@ -1150,11 +1168,13 @@ export class ArcadeStore {
       throw new ArcadeApiError(
         400,
         'INVALID_LEADERBOARD_GAME',
-        '랭킹은 필수 게임 5종에 대해서만 제공됩니다.',
+        '랭킹은 4종 게임에 대해서만 제공됩니다.',
       )
     }
     const gameId = rawGameId
-    const lv = this.state.learningVersions.find((v) => v.id === caller.learningVersionId)!
+    const lv =
+      this.state.learningVersions.find((v) => v.id === caller.learningVersionId) ??
+      this.state.learningVersions[0]!
     const sameVersionParticipantMap = new Map(
       this.state.participants
         .filter((p) => p.learningVersionId === caller.learningVersionId)
@@ -1449,7 +1469,9 @@ export class ArcadeStore {
   } = {}) {
     const now = this.clock()
     const rows = this.state.participants.map((p) => {
-      const lv = this.state.learningVersions.find((v) => v.id === p.learningVersionId)!
+      const lv =
+        this.state.learningVersions.find((v) => v.id === p.learningVersionId) ??
+        this.state.learningVersions[0]!
       const progMap = this.getProgressMap(p.id)
       const hasAnyRun = this.state.runs.some((r) => r.participantId === p.id)
       const learningStatus = computeParticipantLearningStatus({
@@ -1498,7 +1520,6 @@ export class ArcadeStore {
       const requiredClearedCount = REQUIRED_GAME_ORDER.filter((gid) =>
         Boolean(progMap[gid]?.firstClearedAt),
       ).length
-      const bonusCleared = Boolean(progMap[BONUS_GAME_ID]?.firstClearedAt)
 
       // Effective active duration of finalized required runs up to onboarding completion
       const completedAtMs = p.onboardingCompletedAt ? Date.parse(p.onboardingCompletedAt) : null
@@ -1533,7 +1554,6 @@ export class ArcadeStore {
         canEditStartDate: !p.firstPlayedAt,
         requiredClearedCount,
         totalFinalizedAttempts,
-        bonusCleared,
         effectiveDurationMs,
         ruleVersion: lv.ruleVersion,
         contentVersion: lv.contentVersion,
@@ -1668,14 +1688,10 @@ export class ArcadeStore {
       '슈팅_정규최고점',
       '슈팅_클리어',
       '슈팅_확정시도수',
-      '레이싱_정규최고점',
-      '레이싱_클리어',
-      '레이싱_확정시도수',
-      '핀볼_정규최고점',
-      '핀볼_클리어',
-      '핀볼_확정시도수',
+      '부스터런_정규최고점',
+      '부스터런_클리어',
+      '부스터런_확정시도수',
       '전체확정시도수',
-      '보너스완료',
     ]
 
     const lines = [headers.map(sanitizeCsvCell).join(',')]
@@ -1701,14 +1717,10 @@ export class ArcadeStore {
         g.shooter?.standardBestScore ?? '',
         g.shooter?.cleared ? 'Y' : 'N',
         g.shooter?.attempts ?? 0,
-        g.racing?.standardBestScore ?? '',
-        g.racing?.cleared ? 'Y' : 'N',
-        g.racing?.attempts ?? 0,
-        g.pinball?.standardBestScore ?? '',
-        g.pinball?.cleared ? 'Y' : 'N',
-        g.pinball?.attempts ?? 0,
+        g.runner?.standardBestScore ?? '',
+        g.runner?.cleared ? 'Y' : 'N',
+        g.runner?.attempts ?? 0,
         p.totalFinalizedAttempts,
-        p.bonusCleared ? 'Y' : 'N',
       ]
       lines.push(row.map(sanitizeCsvCell).join(','))
     }
@@ -1722,30 +1734,17 @@ export class ArcadeStore {
       (r) => r.contentVersion === contentVersion,
     )
 
-    const items = [
-      ...bundle.shooterQuestions.map((q) => {
-        const coreRec = bundle.records[q.correct_id]!
-        return {
-          gameId: 'shooter' as const,
-          gameTitle: GAME_CATALOG.shooter.title,
-          itemId: q.id,
-          prompt: q.prompt,
-          coreCode: q.coreCode,
-          coreName: coreRec.display_ko,
-        }
-      }),
-      ...bundle.controlRoomStages.map((s) => {
-        const coreRec = bundle.records[s.recordId]!
-        return {
-          gameId: 'control-room' as const,
-          gameTitle: GAME_CATALOG['control-room'].title,
-          itemId: s.clueId,
-          prompt: s.cluePrompt,
-          coreCode: s.correctPanelCode,
-          coreName: coreRec.display_ko,
-        }
-      }),
-    ]
+    const items = bundle.shooterQuestions.map((q) => {
+      const coreRec = bundle.records[q.correct_id]!
+      return {
+        gameId: 'shooter' as const,
+        gameTitle: GAME_CATALOG.shooter.title,
+        itemId: q.id,
+        prompt: q.prompt,
+        coreCode: q.coreCode,
+        coreName: coreRec.display_ko,
+      }
+    })
 
     const evaluated = items.map((meta) => {
       const itemRows = responses.filter(
@@ -1758,7 +1757,7 @@ export class ArcadeStore {
       const rawWrongCount = selectedRows.filter((r) => r.isCorrect === false).length
 
       const selectionSampleSufficient = rawResponderCount >= 5
-      const timeoutSampleSufficient = meta.gameId === 'shooter' && rawExposureCount >= 5
+      const timeoutSampleSufficient = rawExposureCount >= 5
 
       const wrongRatePct = selectionSampleSufficient
         ? Math.round((rawWrongCount / rawResponderCount) * 1000) / 10
@@ -1776,14 +1775,9 @@ export class ArcadeStore {
         responderCount: selectionSampleSufficient ? rawResponderCount : null,
         wrongCount: selectionSampleSufficient ? rawWrongCount : null,
         wrongRatePct,
-        hasTimeoutColumn: meta.gameId === 'shooter',
+        hasTimeoutColumn: true,
         timeoutSampleSufficient,
-        firstExposureTimeoutCount:
-          meta.gameId === 'shooter'
-            ? timeoutSampleSufficient
-              ? rawTimeoutCount
-              : null
-            : null,
+        firstExposureTimeoutCount: timeoutSampleSufficient ? rawTimeoutCount : null,
       }
     })
 

@@ -19,11 +19,13 @@ export function ArcadeHeader({
   onLogout,
 }: ArcadeHeaderProps) {
   const { prefs, toggleMuted, toggleBgmMuted, toggleReduceMotion } = useArcadePreferences()
-  const allFiveLit = Boolean(me && me.requiredClearedCount === 5)
+  const allFourLit = Boolean(
+    me && me.requiredClearedCount === REQUIRED_GAME_ORDER.length,
+  )
 
   return (
     <header
-      className={`arcade-sign-header ${allFiveLit ? 'sign-all-lit' : ''}`}
+      className={`arcade-sign-header ${allFourLit ? 'sign-all-lit' : ''}`}
       style={compact ? { padding: '5px 12px' } : undefined}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -48,18 +50,18 @@ export function ArcadeHeader({
           </span>
         )}
 
-        {allFiveLit && (
+        {allFourLit && (
           <span
             className="cabinet-status-tag cleared"
             style={{ fontSize: 13, padding: '3px 9px' }}
           >
-            ★ 온보딩 배지 획득 · 간판 전체 점등
+            ★ 4종 완료 배지 획득 · 간판 전체 점등
           </span>
         )}
       </div>
 
       {me && !me.beforeStartDate && !me.requiresNickname && !compact && (
-        <div className="cable-board" aria-label="필수 게임 케이블 소켓 및 보너스 관제등 상태">
+        <div className="cable-board" aria-label="4종 게임 케이블 소켓 연결 상태">
           {REQUIRED_GAME_ORDER.map((gid, idx) => {
             const lit = Boolean(me.litSockets[gid])
             const justLit = justLitGameId === gid
@@ -74,18 +76,10 @@ export function ArcadeHeader({
                 <span aria-hidden="true">{lit ? '⚡' : '○'}</span>
                 <span className="mono-num">S{idx + 1}</span>
                 <span>{GAME_CATALOG[gid].shortTitle}</span>
-                <span style={{ fontWeight: 700 }}>{lit ? '연결 완료' : '대기'}</span>
+                <span style={{ fontWeight: 700 }}>{lit ? '연결됨' : '대기'}</span>
               </div>
             )
           })}
-
-          <div
-            className={`beacon-chip ${me.controlLampLit ? 'lit' : ''}`}
-            title={`보너스 관제등: ${me.controlLampLit ? '점등 완료' : '대기'}`}
-          >
-            <span aria-hidden="true">{me.controlLampLit ? '◉' : '◌'}</span>
-            <span>관제등 {me.controlLampLit ? '점등' : '대기'}</span>
-          </div>
         </div>
       )}
 

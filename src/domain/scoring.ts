@@ -1,5 +1,4 @@
 import {
-  buildRacingPlan,
   buildShooterRound,
   buildSnakeSentenceSequence,
   buildTypingSchedule,
@@ -12,23 +11,21 @@ import {
   PASSING_SCORE,
 } from './rules.js'
 import type {
-  ControlRoomRunEvent,
   CoreValueCode,
   FirstExposureOutcome,
   GameActionSummary,
   GameId,
   GameMode,
   GameRunEvent,
-  PinballRunEvent,
-  RacingRunEvent,
   RunEndReason,
+  RunnerRunEvent,
   ShooterRunEvent,
   SnakeRunEvent,
   TypingRunEvent,
 } from './types.js'
 
 export interface ItemResponseOutcome {
-  gameId: 'shooter' | 'control-room'
+  gameId: 'shooter'
   itemId: string
   firstOutcome: FirstExposureOutcome
   selectedIsCorrect: boolean | null
@@ -54,18 +51,14 @@ const MAX_ACTIVE_DURATION_BY_GAME: Record<GameId, Record<GameMode, number>> = {
   typing: { standard: 65_000, assisted: 80_000 },
   snake: { standard: 95_000, assisted: 125_000 },
   shooter: { standard: 180_000, assisted: 240_000 },
-  racing: { standard: 80_000, assisted: 110_000 },
-  pinball: { standard: 105_000, assisted: 130_000 },
-  'control-room': { standard: 1_200_000, assisted: 1_200_000 },
+  runner: { standard: 68_000, assisted: 85_000 },
 }
 
 const ALLOWED_END_REASONS: Record<GameId, readonly RunEndReason[]> = {
   typing: ['completed_all', 'time_up', 'miss_limit'],
   snake: ['completed_all', 'time_up', 'lives_exhausted'],
   shooter: ['completed_all', 'time_up'],
-  racing: ['course_finished', 'time_up'],
-  pinball: ['time_up', 'balls_exhausted'],
-  'control-room': ['exit_activated', 'time_up'],
+  runner: ['course_finished', 'time_up'],
 }
 
 function verifyEnvelopeAndTiming(
@@ -127,7 +120,6 @@ export function verifyAndScoreRun(params: {
   events: readonly GameRunEvent[]
   activeDurationMs: number
   endReason: RunEndReason
-  renderMode?: '3d' | 'simplified' | 'panel-list'
 }): VerifiedRunOutcome {
   const { gameId, mode, seed, contentVersion, events, activeDurationMs, endReason } = params
   verifyEnvelopeAndTiming(gameId, mode, events, activeDurationMs, endReason)
@@ -171,7 +163,6 @@ export function verifyAndScoreRun(params: {
           const matched = slot.acceptedAnswers.some(
             (alias) => normalizePhraseInput(alias) === normalizedSubmitted,
           )
-          // Note: raw ev.input is intentionally never stored in summary or logs
           if (matched) {
             resolvedSlots.add(ev.slotId)
             correctCount += 1
@@ -237,7 +228,6 @@ export function verifyAndScoreRun(params: {
               if (!completedSentenceIds.includes(sentence.id)) {
                 completedSentenceIds.push(sentence.id)
               }
-              // Reset step progress to 0 so endless bonus waves can cycle sentences cleanly!
               stepProgress.set(sentence.id, 0)
             } else {
               stepProgress.set(sentence.id, nextStep)
@@ -279,7 +269,7 @@ export function verifyAndScoreRun(params: {
     case 'shooter': {
       const round = buildShooterRound(bundle, seed)
       const itemMap = new Map(round.map((entry) => [entry.item.id, entry]))
-      const maxAimMs = mode === 'assisted' ? 9_500 : 6_500
+      const maxAimMs = mode === 'assisted' ? 15_000 : 11_000
       const finalizedItems = new Set<string>()
       const startedItems = new Set<string>()
       let correctCount = 0
@@ -372,207 +362,60 @@ export function verifyAndScoreRun(params: {
       }
     }
 
-    case 'racing': {
-      const plan = buildRacingPlan(bundle, seed)
-      const allowedVehicles = new Set(
-        Array.from({ length: 20 }, (_, idx) => `veh-${idx + 1}`),
-      )
-      const allowedObstacles = new Set(
-        Array.from({ length: 12 }, (_, idx) => `obs-${idx + 1}`),
-      )
-      const overtakenVehicles = new Set<string>()
-      const collidedEntities = new Set<string>()
-      const checkpointRecordIds: string[] = []
-      let gateChoice: 'left' | 'right' | 'center' | 'none' = 'none'
+    case 'runner': {
+      const allowedPads = new Set(Array.from({ length: 40 }, (_, i) => `pad-${i + 1}`))
+      const allowedHazards = new Set(Array.from({ length: 30 }, (_, i) => `haz-${i + 1}`))
+      const usedPads = new Set<string>()
+      const usedHazards = new Set<string>()
+      const currentSet = new Set<CoreValueCode>()
+      const everCollected = new Set<CoreValueCode>()
+      let boostCount = 0
+      let bananaSlipCount = 0
+      let completedCoreSets = 0
 
       for (const rawEv of events) {
-        const ev = rawEv as RacingRunEvent
-        if (ev.type === 'collision') {
-          const allowed =
-            ev.targetKind === 'vehicle'
-              ? allowedVehicles.has(ev.entityId)
-              : allowedObstacles.has(ev.entityId)
-          if (!allowed) {
-            throw new RunVerificationError('INVALID_ENTITY', `Unknown racing entity ${ev.entityId}`)
+        const ev = rawEv as RunnerRunEvent
+        if (ev.type === 'step_booster') {
+          if (!allowedPads.has(ev.padId) || !['C', 'O', 'R', 'E'].includes(ev.letter)) {
+            throw new RunVerificationError('INVALID_BOOSTER_PAD', 'Invalid runner booster pad.')
           }
-          if (!collidedEntities.has(ev.entityId)) {
-            collidedEntities.add(ev.entityId)
-            // If previously marked overtaken (should not happen), remove overtake credit
-            overtakenVehicles.delete(ev.entityId)
+          if (usedPads.has(ev.padId)) continue
+          usedPads.add(ev.padId)
+          boostCount += 1
+          currentSet.add(ev.letter)
+          everCollected.add(ev.letter)
+          if (currentSet.size === 4) {
+            completedCoreSets += 1
+            currentSet.clear()
           }
-        } else if (ev.type === 'overtake') {
-          if (!allowedVehicles.has(ev.vehicleId)) {
-            throw new RunVerificationError('INVALID_VEHICLE', `Unknown vehicle ${ev.vehicleId}`)
+        } else if (ev.type === 'hit_hazard') {
+          if (!allowedHazards.has(ev.hazardId)) {
+            throw new RunVerificationError('INVALID_HAZARD', 'Invalid runner hazard.')
           }
-          // Collided vehicles do NOT receive overtake points
-          if (!collidedEntities.has(ev.vehicleId)) {
-            overtakenVehicles.add(ev.vehicleId)
-          }
-        } else if (ev.type === 'checkpoint') {
-          const expected = plan.checkpoints[ev.checkpointIndex]
-          if (!expected || expected.recordId !== ev.recordId) {
-            throw new RunVerificationError('INVALID_CHECKPOINT', 'Checkpoint mismatch.')
-          }
-          if (!checkpointRecordIds.includes(ev.recordId)) {
-            checkpointRecordIds.push(ev.recordId)
-          }
-        } else if (ev.type === 'gate_choice') {
-          if (gateChoice === 'none') {
-            gateChoice = ev.choice
-          }
+          if (usedHazards.has(ev.hazardId)) continue
+          usedHazards.add(ev.hazardId)
+          bananaSlipCount += 1
         } else {
-          throw new RunVerificationError('INVALID_EVENT_TYPE', 'Unexpected racing event.')
+          throw new RunVerificationError('INVALID_EVENT_TYPE', 'Unexpected runner event.')
         }
       }
 
-      const overtakeCount = overtakenVehicles.size
-      const collisionCount = collidedEntities.size
-      // Gate score is strictly 0 regardless of choice! Overtake +2, Collision -1, Pass >= 10
-      const rawScore = overtakeCount * BASE_ACTION_POINTS - collisionCount * 1
+      const rawScore =
+        boostCount * BASE_ACTION_POINTS + completedCoreSets * 4 - bananaSlipCount * 1
       const score = Math.max(0, rawScore)
       const cleared = score >= PASSING_SCORE
-      const gateCorrect = gateChoice === plan.correctGateSide
-      const renderMode = params.renderMode === 'simplified' ? 'simplified' : '3d'
-
       return {
         score,
         cleared,
         activeDurationMs: Math.round(activeDurationMs),
         actionSummary: {
-          kind: 'racing',
-          overtakeCount,
-          collisionCount,
-          gateChoice,
-          gateCorrect,
-          checkpointRecordIds,
-          renderMode,
+          kind: 'runner',
+          boostCount,
+          bananaSlipCount,
+          completedCoreSets,
+          collectedLetters: [...everCollected],
         },
         itemOutcomes: [],
-      }
-    }
-
-    case 'pinball': {
-      const lastScoredAtByBumper: Partial<Record<CoreValueCode, number>> = {}
-      const currentSetLetters = new Set<CoreValueCode>()
-      const everCollectedLetters = new Set<CoreValueCode>()
-      let validHits = 0
-      let completedSets = 0
-      let ballsLost = 0
-      let activeBall = 1
-
-      for (const rawEv of events) {
-        const ev = rawEv as PinballRunEvent
-        if (ballsLost >= 3) break
-        if (ev.type === 'ball_lost') {
-          if (ev.ballId !== activeBall) {
-            throw new RunVerificationError('INVALID_BALL', 'Ball lost out of sequence.')
-          }
-          ballsLost += 1
-          activeBall += 1
-        } else if (ev.type === 'bumper_hit') {
-          if (!['C', 'O', 'R', 'E'].includes(ev.letter)) {
-            throw new RunVerificationError('INVALID_BUMPER', 'Invalid bumper letter.')
-          }
-          if (!ev.separatedSinceLastHit) {
-            continue
-          }
-          const prevHitMs = lastScoredAtByBumper[ev.letter]
-          if (prevHitMs !== undefined && ev.t_ms - prevHitMs < 300) {
-            continue
-          }
-          lastScoredAtByBumper[ev.letter] = ev.t_ms
-          validHits += 1
-          currentSetLetters.add(ev.letter)
-          everCollectedLetters.add(ev.letter)
-          if (currentSetLetters.size === 4) {
-            completedSets += 1
-            currentSetLetters.clear()
-          }
-        } else {
-          throw new RunVerificationError('INVALID_EVENT_TYPE', 'Unexpected pinball event.')
-        }
-      }
-
-      const score = validHits * BASE_ACTION_POINTS + completedSets * 4
-      const cleared = score >= PASSING_SCORE
-      return {
-        score,
-        cleared,
-        activeDurationMs: Math.round(activeDurationMs),
-        actionSummary: {
-          kind: 'pinball',
-          completedSets,
-          validHits,
-          uniqueLettersInCurrentSet: [...currentSetLetters],
-          everCollectedLetters: [...everCollectedLetters],
-          ballsLost,
-        },
-        itemOutcomes: [],
-      }
-    }
-
-    case 'control-room': {
-      const stages = bundle.controlRoomStages
-      let currentStage = 0
-      let wrongSelections = 0
-      let exitActivated = false
-      const firstChoiceRecordedByStage = new Set<number>()
-      const itemOutcomes: ItemResponseOutcome[] = []
-
-      for (const rawEv of events) {
-        const ev = rawEv as ControlRoomRunEvent
-        if (ev.type === 'inspect_clue') {
-          if (ev.stageIndex > currentStage) {
-            throw new RunVerificationError('LOCKED_CLUE', 'Cannot inspect future clue.')
-          }
-        } else if (ev.type === 'select_panel') {
-          if (currentStage >= 4 || ev.stageIndex !== currentStage) {
-            throw new RunVerificationError('INVALID_STAGE', 'Control-room stage mismatch.')
-          }
-          const stageCfg = stages[currentStage]!
-          if (ev.clueId !== stageCfg.clueId) {
-            throw new RunVerificationError('INVALID_CLUE', 'Clue ID mismatch.')
-          }
-          const isCorrect = ev.panelCode === stageCfg.correctPanelCode
-          // Record ONLY the first actual panel choice on this stage in this run
-          if (!firstChoiceRecordedByStage.has(currentStage)) {
-            firstChoiceRecordedByStage.add(currentStage)
-            itemOutcomes.push({
-              gameId: 'control-room',
-              itemId: stageCfg.clueId,
-              firstOutcome: isCorrect ? 'correct' : 'wrong',
-              selectedIsCorrect: isCorrect,
-            })
-          }
-          if (isCorrect) {
-            currentStage += 1
-          } else {
-            wrongSelections += 1
-          }
-        } else if (ev.type === 'activate_exit') {
-          if (currentStage < 4) {
-            throw new RunVerificationError('EXIT_LOCKED', 'Cannot activate exit before 4 panels.')
-          }
-          exitActivated = true
-        } else {
-          throw new RunVerificationError('INVALID_EVENT_TYPE', 'Unexpected control-room event.')
-        }
-      }
-
-      const cleared = currentStage === 4 && exitActivated
-      const interactionMode = params.renderMode === 'panel-list' ? 'panel-list' : '3d'
-      return {
-        score: currentStage * BASE_ACTION_POINTS + (exitActivated ? BASE_ACTION_POINTS : 0),
-        cleared,
-        activeDurationMs: Math.round(activeDurationMs),
-        actionSummary: {
-          kind: 'control-room',
-          restoredPanels: currentStage,
-          wrongSelections,
-          exitActivated,
-          interactionMode,
-        },
-        itemOutcomes,
       }
     }
   }

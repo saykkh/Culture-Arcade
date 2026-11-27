@@ -300,9 +300,9 @@ select:focus-visible,
 
 .lobby-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(176px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(186px, 1fr));
+  gap: 12px;
   flex: 1;
 }
 

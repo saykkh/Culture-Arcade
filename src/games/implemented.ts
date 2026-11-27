@@ -4,9 +4,7 @@ export const IMPLEMENTED_GAME_IDS: ReadonlySet<GameId> = new Set<GameId>([
   'typing',
   'snake',
   'shooter',
-  'racing',
-  'pinball',
-  'control-room',
+  'runner',
 ])
 
 export function isGameImplemented(gameId: GameId): boolean {

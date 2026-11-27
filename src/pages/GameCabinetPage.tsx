@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getContentBundle } from '../../content'
 import { ArcadeHeader } from '../components/ArcadeHeader'
-import { GAME_CATALOG } from '../domain/rules'
+import { GAME_CATALOG, PASSING_SCORE, REQUIRED_GAME_ORDER } from '../domain/rules'
 import type {
   GameId,
   GameMode,
@@ -56,7 +56,7 @@ function formatResultFeedback(
       const diff = prevCount !== null ? curr.correctCount - prevCount : null
       const achievedHeadline = result.cleared
         ? `정확한 공식 문구 ${curr.correctCount}개 연결 (${result.score}점) · 통과 및 케이블 점등!`
-        : `현재 ${result.score}점 (문구 ${curr.correctCount}개) · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과`
+        : `현재 ${result.score}점 (문구 ${curr.correctCount}개) · ${Math.max(2, PASSING_SCORE - result.score)}점 더 획득하면 통과!`
       const nextActionTip = result.cleared
         ? '통과 기준(10점)을 넘겼습니다! 남은 슬롯을 빠르게 연결해 최고 48점 TOP 10 기록에 도전해 보세요.'
         : curr.missedCount >= 5
@@ -82,7 +82,7 @@ function formatResultFeedback(
       const diff = prevCount !== null ? curr.correctChunks - prevCount : null
       const achievedHeadline = result.cleared
         ? `단어 조각 ${curr.correctChunks}개 · 문장 ${curr.completedSentences}개 완성 (${result.score}점) · 통과!`
-        : `현재 ${result.score}점 · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과`
+        : `현재 ${result.score}점 · ${Math.max(2, PASSING_SCORE - result.score)}점 더 획득하면 통과!`
       const pairHint = curr.confusedPairs[0]
         ? `헷갈린 두 조각 다시 보기: "${curr.confusedPairs[0].chosenText}" 대신 "${curr.confusedPairs[0].expectedText}" 순서입니다.`
         : '정답 단어 조각 1개당 +2점, 문장 완성 시 +2점 보너스가 추가되어 10점이 되면 통과됩니다.'
@@ -111,11 +111,11 @@ function formatResultFeedback(
       const diff = prevCount !== null ? curr.correctCount - prevCount : null
       const achievedHeadline = result.cleared
         ? `핵심가치 ${curr.correctCount}/12문항 정답 명중 (${result.score}점) · 통과!`
-        : `현재 ${result.score}점 (${curr.correctCount}문항 정답) · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과`
+        : `현재 ${result.score}점 (${curr.correctCount}문항 정답) · ${Math.max(2, PASSING_SCORE - result.score)}점 더 획득하면 통과!`
       const nextActionTip =
         curr.timeoutCount > 0
-          ? `시간 초과(${curr.timeoutCount}문항)가 있었습니다. 읽기 화면에서 정답 표적을 먼저 고른 뒤 조준 시작을 눌러 보세요.`
-          : '마우스 이동·클릭 또는 방향키·Space로 조준할 수 있습니다. 5문항(10점) 이상 맞히면 통과되며 12문항 만점(24점)에 도전할 수 있습니다!'
+          ? `시간 초과(${curr.timeoutCount}문항)가 있었습니다. 상단 문제를 읽고 1·2·3번 표적을 마우스로 클릭하거나 숫자키 1·2·3을 누르면 즉시 발사됩니다!`
+          : '상단 문제 카드의 핵심 키워드를 보고 표적 클릭 또는 숫자키 1·2·3으로 빠르게 명중시켜 만점(24점)에 도전해 보세요!'
       return {
         achievedHeadline,
         deltaText:
@@ -124,77 +124,35 @@ function formatResultFeedback(
             : null,
         nextActionTip,
         commentaryLines: [
-          `배점 규칙: 정답 명중 +2점, 오답·시간 초과 0점 (10점 달성 시 통과 · 최고 24점 경쟁)`,
+          `배점 규칙: 정답 명중 +2점, 오답·시간 초과 0점 (5문제=10점 달성 시 통과 · 최고 24점 경쟁)`,
           `C: ${bundle.records['core-c']?.display_ko} / O: ${bundle.records['core-o']?.display_ko}`,
           `R: ${bundle.records['core-r']?.display_ko} / E: ${bundle.records['core-e']?.display_ko}`,
         ],
       }
     }
 
-    case 'racing': {
-      const prevCount = prev?.kind === 'racing' ? prev.overtakeCount : null
-      const diff = prevCount !== null ? curr.overtakeCount - prevCount : null
+    case 'runner': {
+      const prevBoosts = prev?.kind === 'runner' ? prev.boostCount : null
+      const diff = prevBoosts !== null ? curr.boostCount - prevBoosts : null
       const achievedHeadline = result.cleared
-        ? `정상 추월 ${curr.overtakeCount}대 · 종료 순점수 ${result.score}점으로 통과!`
-        : `종료 순점수 ${result.score}점 · ${Math.max(1, 10 - result.score)}점 더 확보하면 통과`
-      const cpLines = curr.checkpointRecordIds.map(
-        (rid, idx) => `체크포인트 ${idx + 1}: ${bundle.records[rid]?.display_ko ?? rid}`,
-      )
+        ? `⚡부스터 발판 ${curr.boostCount}회 · C·O·R·E ${curr.completedCoreSets}세트 (${result.score}점) · 통과!`
+        : `현재 ${result.score}점 (부스터 ${curr.boostCount}회) · ${Math.max(1, PASSING_SCORE - result.score)}점 더 획득하면 통과!`
+      const nextActionTip =
+        curr.bananaSlipCount > 0
+          ? `🍌바나나 미끄러짐 ${curr.bananaSlipCount}회(회당 −1점·감속)가 있었습니다! 바나나는 ←·→ 차선 이동으로 피하거나 Space 점프로 뛰어넘으세요.`
+          : 'C·O·R·E 네 글자 발판을 골고루 밟아 4종 세트를 완성할 때마다 +4점 슈퍼 부스터 보너스가 추가됩니다!'
       return {
         achievedHeadline,
         deltaText:
           diff !== null
-            ? `같은 모드 직전 기록 대비 정상 추월 ${diff >= 0 ? `+${diff}` : diff}대`
+            ? `같은 모드 직전 기록 대비 부스터 발판 ${diff >= 0 ? `+${diff}` : diff}회`
             : null,
-        nextActionTip:
-          curr.collisionCount > 0
-            ? `충돌 ${curr.collisionCount}회(회당 −1점)가 있었습니다. 빈 차선으로 미리 이동해 추월(+2점)해 보세요.`
-            : '정상 추월 1대당 +2점입니다. 직선 구간 부스터 2회를 활용해 최고 40점에 도전해 보세요!',
+        nextActionTip,
         commentaryLines: [
-          `배점 규칙: 정상 추월 +2점, 차량·장애물 충돌 −1점, 게이트 0점 (순점수 10점 이상 통과 · 최고 40점)`,
-          `게이트 선택 결과: ${curr.gateCorrect ? '정답 게이트 통과 (조명 점등)' : '정답 표지 확인 완료'}`,
-          ...cpLines,
+          `배점 규칙: ⚡핵심가치 부스터 발판 +2점, C·O·R·E 4종 세트 완성 +4점, 🍌바나나 미끄러짐 −1점 (10점 달성 시 통과)`,
+          `C(${bundle.records['core-c']?.display_ko}) · O(${bundle.records['core-o']?.display_ko})`,
+          `R(${bundle.records['core-r']?.display_ko}) · E(${bundle.records['core-e']?.display_ko})`,
         ],
-      }
-    }
-
-    case 'pinball': {
-      const prevSets = prev?.kind === 'pinball' ? prev.completedSets : null
-      const diff = prevSets !== null ? curr.completedSets - prevSets : null
-      const missing = (['C', 'O', 'R', 'E'] as const).filter(
-        (c) => !curr.everCollectedLetters.includes(c),
-      )
-      const achievedHeadline = result.cleared
-        ? `유효 명중 ${curr.validHits}회 · C·O·R·E ${curr.completedSets}세트 (${result.score}점) · 통과!`
-        : `현재 ${result.score}점 · ${Math.max(2, 10 - result.score)}점 더 획득하면 통과 (남은 글자: ${missing.join(', ') || '없음'})`
-      return {
-        achievedHeadline,
-        deltaText:
-          diff !== null
-            ? `같은 모드 직전 기록 대비 완성 세트 ${diff >= 0 ? `+${diff}` : diff}세트`
-            : null,
-        nextActionTip: result.cleared
-          ? 'C·O·R·E 4글자 세트를 반복 완성할 때마다 +4점 보너스가 추가되어 고득점 경쟁에 유리합니다!'
-          : '좌·우 방향키(또는 화면 좌·우 클릭)로 플리퍼를 튕겨 상단 범퍼(+2점)와 C·O·R·E 세트 보너스(+4점)를 노려 보세요.',
-        commentaryLines: [
-          `배점 규칙: 유효 범퍼 명중 +2점, C·O·R·E 4글자 세트 완성 보너스 +4점 (10점 달성 시 통과)`,
-          `C(${bundle.records['core-c']?.display_ko}) · O(${bundle.records['core-o']?.display_ko}) · R(${bundle.records['core-r']?.display_ko}) · E(${bundle.records['core-e']?.display_ko})`,
-        ],
-      }
-    }
-
-    case 'control-room': {
-      return {
-        achievedHeadline: result.cleared
-          ? `C·O·R·E 관제 패널 4개 복구 및 출구 작동 완료 (${result.score}점) · 관제등 점등!`
-          : `패널 ${curr.restoredPanels}/4 복구 (${result.score}점) · 네 패널 복구 후 출구를 작동하면 완료됩니다`,
-        deltaText: null,
-        nextActionTip: result.cleared
-          ? '오락실 로비 상단의 보너스 관제등이 영구 점등되었습니다!'
-          : '3D 벽면의 [C]·[O]·[R]·[E] 표지판 또는 우측 패널 목록을 눌러 단서와 맞는 패널을 복구하세요.',
-        commentaryLines: bundle.controlRoomStages.map(
-          (st) => `${st.correctPanelCode} (${st.deviceName}): ${bundle.records[st.recordId]?.explanation ?? ''}`,
-        ),
       }
     }
   }
@@ -209,7 +167,6 @@ export function GameCabinetPage({
 }: GameCabinetPageProps) {
   const meta = GAME_CATALOG[gameId]
   const implemented = isGameImplemented(gameId)
-  const isBonus = meta.category === 'bonus'
 
   const [selectedMode, setSelectedMode] = useState<GameMode>('standard')
   const [stage, setStage] = useState<CabinetStage>('briefing')
@@ -221,7 +178,6 @@ export function GameCabinetPage({
     events: GameRunEvent[]
     activeDurationMs: number
     endReason: RunEndReason
-    renderMode?: '3d' | 'simplified' | 'panel-list'
   } | null>(null)
   const [finalResult, setFinalResult] = useState<FinalizeRunResponse | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -232,7 +188,6 @@ export function GameCabinetPage({
   const monitorRef = useRef<HTMLDivElement | null>(null)
   const startRealBtnRef = useRef<HTMLButtonElement | null>(null)
 
-  // Track fullscreen changes without resetting ongoing game state!
   useEffect(() => {
     const onFsChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement))
@@ -241,7 +196,6 @@ export function GameCabinetPage({
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
 
-  // Check 20-minute server submission deadline periodically & on tab return
   useEffect(() => {
     if (!activeRun || stage === 'result' || stage === 'briefing') {
       return
@@ -268,7 +222,6 @@ export function GameCabinetPage({
     }
   }, [activeRun, stage])
 
-  // Esc returns to lobby from briefing/result (while not inside input)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName
@@ -327,7 +280,6 @@ export function GameCabinetPage({
       events: GameRunEvent[]
       activeDurationMs: number
       endReason: RunEndReason
-      renderMode?: '3d' | 'simplified' | 'panel-list'
     },
   ) => {
     setStage('saving')
@@ -389,12 +341,17 @@ export function GameCabinetPage({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className={`cabinet-badge-type ${isBonus ? 'bonus' : ''}`}>
-                {isBonus ? '보너스 관제실' : `필수 #${(meta.socketIndex ?? 0) + 1}`}
-              </span>
+              <span className="cabinet-badge-type">STAGE #{meta.socketIndex + 1}</span>
               <strong style={{ fontSize: 18 }}>{meta.title}</strong>
               {stage === 'playing' && activeRun && (
-                <span className="sample-pill" style={{ borderColor: 'var(--accent-select)', color: 'var(--accent-select)', background: 'rgba(67,231,242,0.1)' }}>
+                <span
+                  className="sample-pill"
+                  style={{
+                    borderColor: 'var(--accent-select)',
+                    color: 'var(--accent-select)',
+                    background: 'rgba(67,231,242,0.1)',
+                  }}
+                >
                   {activeRun.mode === 'assisted' ? '여유롭게 도전 중' : '기본 속도 도전 중'}
                 </span>
               )}
@@ -424,15 +381,11 @@ export function GameCabinetPage({
             </div>
           )}
 
-          {/* Unimplemented placeholder for games scheduled in later stages */}
           {!implemented ? (
             <div className="center-card-wrap" style={{ flexDirection: 'column', gap: 14 }}>
               <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
                 <span className="sample-pill">개발 단계 준비 중</span>
                 <h2 style={{ margin: '12px 0 8px' }}>{meta.title} · 준비 중</h2>
-                <p className="instruction-text">
-                  이 기기는 현재 개발 단계에서 순차 구현 중입니다. 먼저 추천 기기에서 케이블을 연결해 보세요!
-                </p>
                 <button
                   type="button"
                   className="btn-arcade btn-start"
@@ -443,94 +396,143 @@ export function GameCabinetPage({
               </div>
             </div>
           ) : stage === 'briefing' ? (
-            /* 1) Pre-Game Briefing & Mode Selection */
+            /* 1) Visual 3-Step Pre-Game Participant Briefing */
             <div className="center-card-wrap">
-              <div className="cabinet-modal-card" style={{ maxWidth: 680 }}>
-                <h1 style={{ margin: '0 0 10px', fontSize: 24 }}>{meta.title}</h1>
-                <div style={{ display: 'grid', gap: 8, marginBottom: 16 }} className="instruction-text">
-                  <div>
-                    <strong style={{ color: 'var(--accent-select)' }}>클리어 목표:</strong>{' '}
-                    {meta.clearConditionLabel}
-                  </div>
-                  <div>
-                    <strong style={{ color: 'var(--accent-select)' }}>예상 시간 · 조작:</strong>{' '}
-                    {meta.expectedDurationLabel} · {meta.controlsLabel}
-                  </div>
+              <div className="cabinet-modal-card" style={{ maxWidth: 720 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span className="cabinet-badge-type">
+                    STAGE #{meta.socketIndex + 1} / {REQUIRED_GAME_ORDER.length}
+                  </span>
                   {gameProg && (
-                    <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>
-                      내 현재 기록:{' '}
-                      {isBonus
-                        ? gameProg.cleared
-                          ? '보너스 완료됨'
-                          : '미도전'
-                        : `기본 최고 ${gameProg.standardBestScore ?? '-'}점 / 여유 최고 ${
-                            gameProg.assistedBestScore ?? '-'
-                          }점 (${gameProg.cleared ? '클리어 완료' : '미클리어'})`}
-                    </div>
+                    <span className="mono-num" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                      내 최고 기록: 기본 {gameProg.standardBestScore ?? '-'}점 · 여유{' '}
+                      {gameProg.assistedBestScore ?? '-'}점 ({gameProg.cleared ? '✓ 통과됨' : '미통과'})
+                    </span>
                   )}
                 </div>
 
-                {/* First-run open choice between Standard and Assisted modes for all 5 required games */}
-                {!isBonus && (
-                  <div style={{ marginBottom: 18 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                      도전 속도 선택 (첫 판부터 자유 선택 가능 · 동일 배지 인정)
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      <button
-                        type="button"
-                        className="btn-arcade"
-                        aria-pressed={selectedMode === 'standard'}
-                        style={{
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          padding: '12px 14px',
-                          borderColor:
-                            selectedMode === 'standard' ? 'var(--accent-select)' : undefined,
-                          background:
-                            selectedMode === 'standard'
-                              ? 'rgba(67, 231, 242, 0.14)'
-                              : undefined,
-                        }}
-                        onClick={() => {
-                          playArcadeSfx('select')
-                          setSelectedMode('standard')
-                        }}
-                      >
-                        <strong>⚡ 기본 속도 (정규 모드)</strong>
-                        <span style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'left' }}>
-                          기본 타이머·속도 · 정규 최고점 TOP 10 랭킹 반영
-                        </span>
-                      </button>
+                <h1 style={{ margin: '0 0 14px', fontSize: 25 }}>{meta.title}</h1>
 
-                      <button
-                        type="button"
-                        className="btn-arcade"
-                        aria-pressed={selectedMode === 'assisted'}
-                        style={{
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          padding: '12px 14px',
-                          borderColor:
-                            selectedMode === 'assisted' ? 'var(--accent-clear)' : undefined,
-                          background:
-                            selectedMode === 'assisted'
-                              ? 'rgba(185, 246, 108, 0.12)'
-                              : undefined,
-                        }}
-                        onClick={() => {
-                          playArcadeSfx('select')
-                          setSelectedMode('assisted')
-                        }}
-                      >
-                        <strong>🌿 여유롭게 도전 (지원 모드)</strong>
-                        <span style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'left' }}>
-                          {meta.assistedDiffLabel}
-                        </span>
-                      </button>
+                {/* Clear 3-Step Participant Guide */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 10,
+                    marginBottom: 18,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 9,
+                      background: '#111927',
+                      border: '1px solid rgba(67, 231, 242, 0.3)',
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-select)', marginBottom: 3 }}>
+                      🎯 1. 무엇을 하는 게임인가요?
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>{meta.howToPlayOneLine}</div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div
+                      style={{
+                        padding: '11px 14px',
+                        borderRadius: 9,
+                        background: '#111927',
+                        border: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-warn)', marginBottom: 3 }}>
+                        🕹️ 2. 조작 방법 · 시간
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{meta.controlsLabel}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+                        소요 시간: {meta.expectedDurationLabel}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '11px 14px',
+                        borderRadius: 9,
+                        background: '#111927',
+                        border: '1px solid rgba(185, 246, 108, 0.3)',
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-clear)', marginBottom: 3 }}>
+                        🏆 3. 통과 기준 & 랭킹 경쟁
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>
+                        10점 달성 시 즉시 통과! (기본 +2점)
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
+                        10점 이후에도 끝까지 플레이해 TOP 10 고득점에 도전하세요!
+                      </div>
                     </div>
                   </div>
-                )}
+                </div>
+
+                {/* Speed Mode Selection */}
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                    도전 속도 선택 (두 모드 모두 10점 달성 시 동일하게 케이블·배지 인정)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button
+                      type="button"
+                      className="btn-arcade"
+                      aria-pressed={selectedMode === 'standard'}
+                      style={{
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        padding: '12px 14px',
+                        borderColor:
+                          selectedMode === 'standard' ? 'var(--accent-select)' : undefined,
+                        background:
+                          selectedMode === 'standard'
+                            ? 'rgba(67, 231, 242, 0.14)'
+                            : undefined,
+                      }}
+                      onClick={() => {
+                        playArcadeSfx('select')
+                        setSelectedMode('standard')
+                      }}
+                    >
+                      <strong>⚡ 기본 속도 (정규 모드)</strong>
+                      <span style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'left' }}>
+                        기본 타이머·속도 · 정규 최고점 TOP 10 랭킹 반영
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn-arcade"
+                      aria-pressed={selectedMode === 'assisted'}
+                      style={{
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        padding: '12px 14px',
+                        borderColor:
+                          selectedMode === 'assisted' ? 'var(--accent-clear)' : undefined,
+                        background:
+                          selectedMode === 'assisted'
+                            ? 'rgba(185, 246, 108, 0.12)'
+                            : undefined,
+                      }}
+                      onClick={() => {
+                        playArcadeSfx('select')
+                        setSelectedMode('assisted')
+                      }}
+                    >
+                      <strong>🌿 여유롭게 도전 (지원 모드)</strong>
+                      <span style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'left' }}>
+                        {meta.assistedDiffLabel}
+                      </span>
+                    </button>
+                  </div>
+                </div>
 
                 {errorMsg && (
                   <div className="status-alert error" style={{ marginBottom: 12 }}>
@@ -539,28 +541,26 @@ export function GameCabinetPage({
                 )}
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }}>
-                  {!isBonus && (
-                    <button
-                      type="button"
-                      className="btn-arcade"
-                      onClick={startPractice}
-                    >
-                      30초 짧은 연습 해보기
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn-arcade"
+                    onClick={startPractice}
+                  >
+                    30초 연습 해보기
+                  </button>
                   <button
                     type="button"
                     className="btn-arcade btn-start"
-                    style={{ fontSize: 16, padding: '10px 20px' }}
+                    style={{ fontSize: 16, padding: '10px 22px' }}
                     onClick={() => void launchServerRun()}
                   >
-                    {isBonus ? '관제실 입장 ▶' : '연습 건너뛰고 본게임 START ▶'}
+                    본게임 바로 START ▶
                   </button>
                 </div>
               </div>
             </div>
           ) : stage === 'practice' ? (
-            /* 2) Optional 30-second single-goal Practice (excluded from server stats) */
+            /* 2) Optional 30-second single-goal Practice */
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
               <div
                 className="status-alert"
@@ -629,17 +629,15 @@ export function GameCabinetPage({
               />
             </div>
           ) : stage === 'saving' ? (
-            /* 4) Saving state BEFORE lighting cable or confirming completion */
             <div className="center-card-wrap">
               <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
                 <h2 style={{ marginTop: 0 }}>⏳ 결과 저장 중...</h2>
                 <p className="instruction-text">
-                  서버에서 점수와 클리어 판정을 확정하고 있습니다. 확정 전에는 케이블 점등이 반영되지 않습니다.
+                  서버에서 점수와 통과 판정을 확정하고 있습니다.
                 </p>
               </div>
             </div>
           ) : stage === 'save_error' ? (
-            /* 5) Transient error retry */
             <div className="center-card-wrap">
               <div className="cabinet-modal-card">
                 <h2 style={{ marginTop: 0, color: 'var(--accent-warn)' }}>
@@ -669,12 +667,12 @@ export function GameCabinetPage({
               </div>
             </div>
           ) : finalResult ? (
-            /* 6) Confirmed Result Screen: ① Action achieved ② One next-round tip ③ Primary buttons ④ Expandable commentary */
             (() => {
               const fb = formatResultFeedback(finalResult, me.contentVersion)
-              const isFifthCompletion =
+              const isAllFourCompleted =
                 finalResult.newlyEarnedBadge ||
-                (finalResult.cleared && finalResult.requiredClearedCount === 5 && !isBonus)
+                (finalResult.cleared &&
+                  finalResult.requiredClearedCount === REQUIRED_GAME_ORDER.length)
               const nextRecommendedId = finalResult.recommendation.targetGameId
 
               return (
@@ -689,7 +687,7 @@ export function GameCabinetPage({
                             : undefined
                         }
                       >
-                        {finalResult.cleared ? '✓ 서버 확정 · 클리어 달성' : '▲ 서버 확정 · 미클리어'}
+                        {finalResult.cleared ? '✓ 서버 확정 · 통과 달성' : '▲ 서버 확정 · 미통과'}
                       </span>
                       <span className="mono-num" style={{ fontSize: 18 }}>
                         이번 점수 <strong style={{ color: 'var(--accent-select)' }}>{finalResult.score}</strong>점 · 내 최고{' '}
@@ -697,7 +695,6 @@ export function GameCabinetPage({
                       </span>
                     </div>
 
-                    {/* ① 이번에 해낸 행동 */}
                     <h2 style={{ margin: '6px 0 8px', fontSize: 22 }}>{fb.achievedHeadline}</h2>
                     {fb.deltaText && (
                       <div style={{ fontSize: 14, color: 'var(--accent-select)', marginBottom: 8 }}>
@@ -705,7 +702,6 @@ export function GameCabinetPage({
                       </div>
                     )}
 
-                    {/* ② 다음 판에서 바꿀 행동 한 가지 */}
                     <div
                       style={{
                         padding: '11px 14px',
@@ -720,8 +716,7 @@ export function GameCabinetPage({
                       {fb.nextActionTip}
                     </div>
 
-                    {/* 조작 도움 one-click panel on unclear */}
-                    {showAssistHelp && !isBonus && (
+                    {showAssistHelp && (
                       <div className="status-alert clear" style={{ marginBottom: 14, justifyContent: 'space-between' }}>
                         <span>
                           <strong>여유롭게 도전 안내:</strong> {meta.assistedDiffLabel}
@@ -736,16 +731,15 @@ export function GameCabinetPage({
                       </div>
                     )}
 
-                    {/* ③ 주요 버튼 */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
                       {finalResult.cleared ? (
-                        isFifthCompletion ? (
+                        isAllFourCompleted ? (
                           <button
                             type="button"
                             className="btn-arcade btn-clear-cta"
                             onClick={() => onNavigate('/arcade')}
                           >
-                            ★ 완성된 간판 보기
+                            ★ 완성된 4종 간판 보기
                           </button>
                         ) : nextRecommendedId ? (
                           <button
@@ -773,15 +767,13 @@ export function GameCabinetPage({
                           >
                             다시 도전 ▶
                           </button>
-                          {!isBonus && (
-                            <button
-                              type="button"
-                              className="btn-arcade"
-                              onClick={() => setShowAssistHelp((v) => !v)}
-                            >
-                              조작 도움 보기
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="btn-arcade"
+                            onClick={() => setShowAssistHelp((v) => !v)}
+                          >
+                            여유 모드로 도움받기
+                          </button>
                         </>
                       )}
 
@@ -791,7 +783,7 @@ export function GameCabinetPage({
                           className="btn-arcade"
                           onClick={() => void launchServerRun()}
                         >
-                          다시 도전
+                          고득점 재도전
                         </button>
                       )}
 
@@ -800,21 +792,18 @@ export function GameCabinetPage({
                         className="btn-arcade"
                         onClick={() => onNavigate('/arcade')}
                       >
-                        점등된 로비에서 기기 고르기
+                        오락실 로비로
                       </button>
 
-                      {!isBonus && (
-                        <button
-                          type="button"
-                          className="btn-arcade"
-                          onClick={() => onNavigate(`/leaderboard?game=${gameId}`)}
-                        >
-                          🏆 TOP 10 열기
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="btn-arcade"
+                        onClick={() => onNavigate(`/leaderboard?game=${gameId}`)}
+                      >
+                        🏆 TOP 10 열기
+                      </button>
                     </div>
 
-                    {/* ④ 펼쳐 볼 수 있는 점수·배점·학습 해설 */}
                     <details
                       style={{
                         background: '#111722',
@@ -840,7 +829,6 @@ export function GameCabinetPage({
             })()
           ) : null}
 
-          {/* Consistent Edge Key Guide Footer */}
           <div className="hud-key-footer">
             <span>조작 안내: {meta.controlsLabel}</span>
             <span>탭 전환 시 자동 일시 정지 · Esc 로비 복귀(대기/결과 화면)</span>

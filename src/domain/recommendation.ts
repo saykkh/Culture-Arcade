@@ -9,21 +9,21 @@ import type {
 export function computeLobbyRecommendation(
   progressByGame: Partial<Record<GameId, ParticipantProgressRecord>>,
 ): RecommendationBanner {
+  const totalRequired = REQUIRED_GAME_ORDER.length
   const clearedRequired = REQUIRED_GAME_ORDER.filter(
     (gid) => Boolean(progressByGame[gid]?.firstClearedAt),
   )
   const clearedCount = clearedRequired.length
 
-  if (clearedCount === REQUIRED_GAME_ORDER.length) {
+  if (clearedCount === totalRequired) {
     return {
       targetGameId: null,
       kind: 'all_completed',
       headline: '완료 기록 보기',
-      subline: '필수 5/5 완료 · 온보딩 배지와 간판 전체 점등 달성',
+      subline: `필수 ${totalRequired}/${totalRequired} 완료 · 온보딩 배지와 간판 전체 점등 달성!`,
     }
   }
 
-  // Find most recently started required game
   let latestGameId: RequiredGameId | null = null
   let latestStartedMs = -1
   for (const gid of REQUIRED_GAME_ORDER) {
@@ -42,7 +42,7 @@ export function computeLobbyRecommendation(
       targetGameId: 'typing',
       kind: 'first_visit',
       headline: '첫 판 추천 · 산성비 타자',
-      subline: '모든 게임이 열려 있습니다 · 짧은 공식 표현부터 가볍게 시작해 보세요',
+      subline: '4종 오락기가 모두 열려 있습니다 · 각 게임에서 10점 이상 달성하면 통과됩니다!',
     }
   }
 
@@ -53,7 +53,7 @@ export function computeLobbyRecommendation(
       targetGameId: latestGameId,
       kind: 'resume_uncleared',
       headline: `이어서 도전 · ${gameTitle}`,
-      subline: `필수 ${clearedCount}/5 완료 · 이번 판은 처음부터 시작`,
+      subline: `필수 ${clearedCount}/${totalRequired} 완료 · 이번 판은 처음부터 시작 (10점 달성 시 통과)`,
     }
   }
 
@@ -63,6 +63,6 @@ export function computeLobbyRecommendation(
     targetGameId: nextUncleared,
     kind: 'next_uncleared',
     headline: `다음 추천 · ${GAME_CATALOG[nextUncleared].title}`,
-    subline: `필수 ${clearedCount}/5 완료 · 남은 케이블을 연결해 간판을 완성하세요`,
+    subline: `필수 ${clearedCount}/${totalRequired} 완료 · 남은 케이블을 연결해 간판을 완성하세요!`,
   }
 }

@@ -12,7 +12,6 @@ import type {
 export interface ParticipantGameSummary {
   gameId: GameId
   title: string
-  category: 'required' | 'bonus'
   allowedModes: readonly GameMode[]
   standardBestScore: number | null
   assistedBestScore: number | null
@@ -36,7 +35,6 @@ export interface ParticipantMeResponse {
   sampleNotice: string | null
   requiredClearedCount: number
   badgeEarned: boolean
-  controlLampLit: boolean
   litSockets: Record<string, boolean>
   recommendation: RecommendationBanner
   games: ParticipantGameSummary[]
@@ -67,11 +65,9 @@ export interface FinalizeRunResponse {
   standardBestScore: number | null
   assistedBestScore: number | null
   newlyLitSocket: boolean
-  newlyLitControlLamp: boolean
   newlyEarnedBadge: boolean
   requiredClearedCount: number
   badgeEarned: boolean
-  controlLampLit: boolean
   litSockets: Record<string, boolean>
   recommendation: RecommendationBanner
 }
@@ -85,7 +81,6 @@ export interface PendingRunSubmission {
   events: GameRunEvent[]
   activeDurationMs: number
   endReason: RunEndReason
-  renderMode?: '3d' | 'simplified' | 'panel-list'
 }
 
 const PENDING_SUBMISSION_KEY = 'ls-way-arcade:pending-submission:v04'
@@ -211,7 +206,6 @@ export const arcadeApi = {
       events: GameRunEvent[]
       activeDurationMs: number
       endReason: RunEndReason
-      renderMode?: '3d' | 'simplified' | 'panel-list'
     },
   ) =>
     requestJson<FinalizeRunResponse>(`/api/runs/${runId}/result`, {
@@ -315,7 +309,6 @@ export const arcadeApi = {
         canEditStartDate: boolean
         requiredClearedCount: number
         totalFinalizedAttempts: number
-        bonusCleared: boolean
         effectiveDurationMs: number | null
         ruleVersion: string
         contentVersion: string
@@ -381,7 +374,7 @@ export const arcadeApi = {
       isSampleContent: boolean
       sampleThreshold: number
       items: Array<{
-        gameId: 'shooter' | 'control-room'
+        gameId: 'shooter'
         gameTitle: string
         contentVersion: string
         itemId: string

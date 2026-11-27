@@ -224,56 +224,6 @@ export function buildShooterRound(
   })
 }
 
-export interface ScheduledRacingPlan {
-  checkpoints: [
-    { index: 0; recordId: string; domain: 'mission' | 'vision'; displayKo: string },
-    { index: 1; recordId: string; domain: 'mission' | 'vision'; displayKo: string },
-    { index: 2; recordId: string; domain: 'core_value'; displayKo: string },
-  ]
-  gatePromptRecordId: string
-  gatePromptDomain: 'mission' | 'vision'
-  leftGateDomain: 'mission' | 'vision'
-  rightGateDomain: 'mission' | 'vision'
-  correctGateSide: 'left' | 'right'
-}
-
-export function buildRacingPlan(
-  bundle: LearningContentBundle,
-  seed: number,
-): ScheduledRacingPlan {
-  const rng = mulberry32(seed ^ 0x7f4a7c15)
-  const missionRec = bundle.records[bundle.racing.missionRecordId]!
-  const visionRec = bundle.records[bundle.racing.visionRecordId]!
-  const coreRec = bundle.records[bundle.racing.coreSummaryRecordId]!
-
-  const missionFirst = rng() < 0.5
-  const cp0 = missionFirst
-    ? { index: 0 as const, recordId: missionRec.id, domain: 'mission' as const, displayKo: missionRec.display_ko }
-    : { index: 0 as const, recordId: visionRec.id, domain: 'vision' as const, displayKo: visionRec.display_ko }
-  const cp1 = missionFirst
-    ? { index: 1 as const, recordId: visionRec.id, domain: 'vision' as const, displayKo: visionRec.display_ko }
-    : { index: 1 as const, recordId: missionRec.id, domain: 'mission' as const, displayKo: missionRec.display_ko }
-
-  // Gate matches Checkpoint 2 (index 1)'s retained expression; side also seeded so correct answer isn't fixed
-  const leftIsMission = rng() < 0.5
-  const leftGateDomain = leftIsMission ? 'mission' : 'vision'
-  const rightGateDomain = leftIsMission ? 'vision' : 'mission'
-  const correctGateSide = cp1.domain === leftGateDomain ? 'left' : 'right'
-
-  return {
-    checkpoints: [
-      cp0,
-      cp1,
-      { index: 2, recordId: coreRec.id, domain: 'core_value', displayKo: coreRec.display_ko },
-    ],
-    gatePromptRecordId: cp1.recordId,
-    gatePromptDomain: cp1.domain,
-    leftGateDomain,
-    rightGateDomain,
-    correctGateSide,
-  }
-}
-
 export interface ContentValidationReport {
   valid: boolean
   errors: string[]
@@ -330,15 +280,11 @@ export function validateContentBundle(bundle: LearningContentBundle): ContentVal
     errors.push(`Shooter correct lanes must be [4,4,4], got ${laneCounts.join(',')}.`)
   }
 
-  const bumperLetters = new Set(bundle.pinballBumpers.map((b) => b.letter))
+  const padLetters = new Set(bundle.runnerPads.map((b) => b.letter))
   for (const code of ['C', 'O', 'R', 'E'] as const) {
-    if (!bumperLetters.has(code)) {
-      errors.push(`Pinball missing bumper ${code}.`)
+    if (!padLetters.has(code)) {
+      errors.push(`Runner missing core pad ${code}.`)
     }
-  }
-
-  if (bundle.controlRoomStages.length !== 4) {
-    errors.push('Control room must have 4 stages.')
   }
 
   return { valid: errors.length === 0, errors }

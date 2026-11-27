@@ -5,13 +5,12 @@ import {
   buildTypingSchedule,
   SAMPLE_CONTENT_V04,
 } from '../content'
-import { ArcadeStore, SAMPLE_VIRTUAL_CODES } from '../server/store'
 import {
   handleApiRequest,
   PARTICIPANT_COOKIE_NAME,
   PARTICIPANT_SYNC_COOKIE_NAME,
 } from '../server/router'
-import { ControlRoomSimulation } from '../src/games/control-room/engine'
+import { ArcadeStore, SAMPLE_VIRTUAL_CODES } from '../server/store'
 
 function extractCookieMap(setCookie: string | string[] | undefined): Record<string, string> {
   const arr = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : []
@@ -26,11 +25,10 @@ function extractCookieMap(setCookie: string | string[] | undefined): Record<stri
   return out
 }
 
-describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계·30명 동시 부하 검증', () => {
+describe('Stage 5 & 6 · 운영 집계·4종 인수 경계·서버리스 상태 동기화·30명 동시 부하 검증', () => {
   it('Vercel 서버리스 리라이트(__path) 및 콜드스타트 멀티 컨테이너 환경에서도 1111-1111-1111 코드로 입장·닉네임·플레이·저장이 유지된다', async () => {
     const fixedClock = () => new Date('2026-11-26T10:00:00Z')
 
-    // Container A: POST /api/index?__path=/api/session/code with 1111-1111-1111
     const containerA = new ArcadeStore({ filePath: null, clock: fixedClock })
     const loginRes = await handleApiRequest(
       {
@@ -50,7 +48,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
         .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
         .join('; ')
 
-    // Container B (brand-new cold instance!): PATCH nickname
     const containerB = new ArcadeStore({ filePath: null, clock: fixedClock })
     const nickRes = await handleApiRequest(
       {
@@ -64,7 +61,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     expect(nickRes.status).toBe(200)
     cookieJar = { ...cookieJar, ...extractCookieMap(nickRes.headers['Set-Cookie']) }
 
-    // Container C (brand-new cold instance!): POST start typing run
     const containerC = new ArcadeStore({ filePath: null, clock: fixedClock })
     const startRes = await handleApiRequest(
       {
@@ -79,7 +75,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     cookieJar = { ...cookieJar, ...extractCookieMap(startRes.headers['Set-Cookie']) }
     const startedRun = JSON.parse(startRes.body) as { runId: string; seed: number }
 
-    // Container D (brand-new cold instance!): PUT finalize typing run -> clears S1!
     const containerD = new ArcadeStore({ filePath: null, clock: fixedClock })
     const sched = buildTypingSchedule(SAMPLE_CONTENT_V04, startedRun.seed, 'standard')
     const finRes = await handleApiRequest(
@@ -105,7 +100,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     cookieJar = { ...cookieJar, ...extractCookieMap(finRes.headers['Set-Cookie']) }
     expect(cookieJar[PARTICIPANT_SYNC_COOKIE_NAME]).toBeTruthy()
 
-    // Container E (brand-new cold instance!): GET /api/me -> nickname & 1/5 cable intact!
     const containerE = new ArcadeStore({ filePath: null, clock: fixedClock })
     const meRes = await handleApiRequest(
       {
@@ -121,6 +115,7 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     expect(meJson.requiredClearedCount).toBe(1)
     expect(meJson.litSockets.typing).toBe(true)
   })
+
   it('테스트 입장코드 111111111111(하이픈 유무 무관)로 즉시 로그인할 수 있다', () => {
     const store = new ArcadeStore({ filePath: null, clock: () => new Date('2026-11-26T10:00:00Z') })
     const rawLogin = store.loginWithPersonalCode('111111111111', 'quick-ip-1')
@@ -131,59 +126,20 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     expect(formattedLogin.participantId).toBe(rawLogin.participantId)
   })
 
-  it('보너스 관제실만 완료하면 필수 0/5와 관제등 점등이 함께 표시되고, 3D와 패널 목록 탐색 결과가 동일하다', async () => {
+  it('삭제된 게임 ID(racing·pinball·control-room) 시작 요청은 400 INVALID_GAME으로 안전하게 거절된다', async () => {
     const store = new ArcadeStore({ filePath: null, clock: () => new Date('2026-11-26T10:00:00Z') })
-    const pA = store.registerParticipantByAdmin({ rosterRef: 'CTRL-3D', availableFromDate: '2026-11-20' })
-    const pB = store.registerParticipantByAdmin({ rosterRef: 'CTRL-LIST', availableFromDate: '2026-11-20' })
+    const login = store.loginWithPersonalCode(SAMPLE_VIRTUAL_CODES.ACTIVE_TODAY, 'ip-removed')
+    store.setParticipantNickname(login.sessionToken, '개편검증자')
 
-    const loginA = store.loginWithPersonalCode(pA.issuedCodeOnce, 'ip-a')
-    store.setParticipantNickname(loginA.sessionToken, '관제탐색3D')
-    const loginB = store.loginWithPersonalCode(pB.issuedCodeOnce, 'ip-b')
-    store.setParticipantNickname(loginB.sessionToken, '관제패널목록')
-
-    const playControlRoom = () => {
-      const sim = new ControlRoomSimulation('sample-v0.4')
-      sim.advanceTime(1200)
-      // Stage 0 wrong once -> hint -> then C, O, R, E -> activateExit
-      expect(sim.selectPanel('E').correct).toBe(false)
-      for (const code of ['C', 'O', 'R', 'E'] as const) {
-        sim.advanceTime(1500)
-        expect(sim.selectPanel(code).correct).toBe(true)
-      }
-      expect(sim.activateExit()).toBe(true)
-      return sim
+    for (const removedId of ['racing', 'pinball', 'control-room']) {
+      await expect(
+        store.startGameRun(login.sessionToken, removedId, 'standard'),
+      ).rejects.toThrow(/존재하지 않는 게임/)
     }
-
-    const simA = playControlRoom()
-    const simB = playControlRoom()
-
-    const runA = await store.startGameRun(loginA.sessionToken, 'control-room', 'standard')
-    const resA = await store.finalizeGameRun(loginA.sessionToken, runA.runId, {
-      events: simA.getEvents(),
-      activeDurationMs: 12_000,
-      endReason: 'exit_activated',
-      renderMode: '3d',
-    })
-
-    const runB = await store.startGameRun(loginB.sessionToken, 'control-room', 'standard')
-    const resB = await store.finalizeGameRun(loginB.sessionToken, runB.runId, {
-      events: simB.getEvents(),
-      activeDurationMs: 12_000,
-      endReason: 'exit_activated',
-      renderMode: 'panel-list',
-    })
-
-    expect(resA.cleared).toBe(true)
-    expect(resB.cleared).toBe(true)
-    expect(resA.score).toBe(resB.score)
-    expect(resA.requiredClearedCount).toBe(0)
-    expect(resA.controlLampLit).toBe(true)
-    expect(resA.newlyLitControlLamp).toBe(true)
-    expect(resA.badgeEarned).toBe(false)
   })
 
-  it('개인 일정(기한 후 완료 보존·시작일 변경 잠금·권장일 미설정 이수)과 CSV(UTF-8 BOM·수식 방지·코드 비노출)를 검증한다', async () => {
-    let now = new Date('2026-11-26T15:00:00Z') // 2026-11-27 00:00 KST (past 2026-11-25 due date!)
+  it('개인 일정(기한 후 완료 보존·시작일 변경 잠금·권장일 미설정 4/4 이수)과 CSV(UTF-8 BOM·수식 방지·코드 비노출)를 검증한다', async () => {
+    const now = new Date('2026-11-26T15:00:00Z') // 2026-11-27 00:00 KST (past 2026-11-25 due date)
     const store = new ArcadeStore({ filePath: null, clock: () => now })
 
     const lateReg = store.registerParticipantByAdmin({
@@ -198,16 +154,14 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     })
 
     const loginLate = store.loginWithPersonalCode(lateReg.issuedCodeOnce, 'pc-1')
-    // Formula-like nickname attempt is blocked by nickname regex; admin-set valid nickname tested
     store.setParticipantNickname(loginLate.sessionToken, '지각완주자')
 
-    // Complete all 5 required games across simulated PC switch
-    const clearAll5 = async (code: string) => {
+    const clearAll4 = async (code: string) => {
       const s = store.loginWithPersonalCode(code, 'pc-other')
       const r1 = await store.startGameRun(s.sessionToken, 'typing', 'standard')
       const sc1 = buildTypingSchedule(SAMPLE_CONTENT_V04, r1.seed, 'standard')
       await store.finalizeGameRun(s.sessionToken, r1.runId, {
-        events: sc1.slice(0, 10).map((slot, i) => ({
+        events: sc1.slice(0, 6).map((slot, i) => ({
           seq: i + 1,
           t_ms: (i + 1) * 1000,
           type: 'submit_phrase' as const,
@@ -222,7 +176,7 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
       const sc2 = buildSnakeSentenceSequence(SAMPLE_CONTENT_V04, r2.seed)
       let seq = 0
       await store.finalizeGameRun(s.sessionToken, r2.runId, {
-        events: sc2.slice(0, 3).flatMap((sent) =>
+        events: sc2.slice(0, 2).flatMap((sent) =>
           sent.chunks.map((c, stepIndex) => ({
             seq: ++seq,
             t_ms: seq * 1000,
@@ -240,7 +194,7 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
       const sc3 = buildShooterRound(SAMPLE_CONTENT_V04, r3.seed)
       seq = 0
       await store.finalizeGameRun(s.sessionToken, r3.runId, {
-        events: sc3.slice(0, 8).flatMap((q) => [
+        events: sc3.slice(0, 6).flatMap((q) => [
           { seq: ++seq, t_ms: seq * 1500, type: 'aim_start' as const, itemId: q.item.id },
           {
             seq: ++seq,
@@ -255,71 +209,57 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
         endReason: 'completed_all',
       })
 
-      const r4 = await store.startGameRun(s.sessionToken, 'racing', 'standard')
+      const r4 = await store.startGameRun(s.sessionToken, 'runner', 'standard')
       await store.finalizeGameRun(s.sessionToken, r4.runId, {
-        events: Array.from({ length: 10 }, (_, i) => ({
-          seq: i + 1,
-          t_ms: (i + 1) * 2000,
-          type: 'overtake' as const,
-          vehicleId: `veh-${i + 1}`,
-        })),
-        activeDurationMs: 35_000,
-        endReason: 'course_finished',
-      })
-
-      const r5 = await store.startGameRun(s.sessionToken, 'pinball', 'standard')
-      await store.finalizeGameRun(s.sessionToken, r5.runId, {
         events: (['C', 'O', 'R', 'E'] as const).map((letter, idx) => ({
           seq: idx + 1,
-          t_ms: (idx + 1) * 500,
-          type: 'bumper_hit' as const,
-          ballId: 1,
+          t_ms: (idx + 1) * 2000,
+          type: 'step_booster' as const,
+          padId: `pad-${idx + 1}`,
           letter,
-          separatedSinceLastHit: true,
         })),
-        activeDurationMs: 12_000,
-        endReason: 'time_up',
+        activeDurationMs: 25_000,
+        endReason: 'course_finished',
       })
     }
 
-    await clearAll5(lateReg.issuedCodeOnce)
+    await clearAll4(lateReg.issuedCodeOnce)
 
-    // Start date cannot be edited after firstPlayedAt!
     expect(() =>
       store.updateParticipantByAdmin(lateReg.participantId, { availableFromDate: '2026-11-22' }),
     ).toThrow(/시작일/)
 
-    // Even if admin extends recommendedDueDate AFTER completion, dueDateAtCompletion preserves '기한 후 완료'!
     store.updateParticipantByAdmin(lateReg.participantId, { recommendedDueDate: '2026-12-30' })
     const lateRow = store.queryAdminParticipants({ search: 'HR-LATE' }).participants[0]!
     expect(lateRow.dueStatus).toBe('completed_late')
     expect(lateRow.dueStatusLabel).toBe('기한 후 완료')
+    expect(lateRow.requiredClearedCount).toBe(4)
 
-    // Participant without due date also completes 5/5 cleanly
     const loginNoDue = store.loginWithPersonalCode(noDueReg.issuedCodeOnce, 'pc-nodue')
     store.setParticipantNickname(loginNoDue.sessionToken, '자유일정완주')
-    await clearAll5(noDueReg.issuedCodeOnce)
+    await clearAll4(noDueReg.issuedCodeOnce)
     const noDueRow = store.queryAdminParticipants({ search: 'HR-NODUE' }).participants[0]!
     expect(noDueRow.learningStatus).toBe('completed')
     expect(noDueRow.dueStatus).toBe('no_due_date')
 
-    // Register formula-prefixed rosterRef to verify CSV formula guard & BOM & code exclusion
     const formulaReg = store.registerParticipantByAdmin({
       rosterRef: '=HYPERLINK("http://evil")',
       availableFromDate: '2026-11-20',
     })
     const csv = store.exportParticipantsCsv({})
     expect(csv.startsWith('\uFEFF')).toBe(true)
+    expect(csv).toContain('부스터런_정규최고점')
+    expect(csv).not.toContain('레이싱_정규최고점')
+    expect(csv).not.toContain('보너스완료')
     expect(csv).toContain(`"'=HYPERLINK(""http://evil"")"`)
     expect(csv).not.toContain(lateReg.issuedCodeOnce)
     expect(csv).not.toContain(formulaReg.issuedCodeOnce)
   })
 
-  it('동점자 선착순 정렬, 지원 최고점의 정규 랭킹 비간섭, 문항 오답·시간초과 표본 기준(5명 경계 및 40% 오답률)을 검증한다', async () => {
+  it('동점자 선착순 정렬, 지원 최고점의 정규 랭킹 비간섭, 슈팅 오답·시간초과 표본 기준(5명 경계 및 40% 오답률)을 검증한다', async () => {
     let clockMs = Date.parse('2026-11-26T08:00:00Z')
     const store = new ArcadeStore({ filePath: null, clock: () => new Date(clockMs) })
 
-    // Create 5 participants with different start dates (all already started)
     const regs = Array.from({ length: 5 }, (_, idx) =>
       store.registerParticipantByAdmin({
         rosterRef: `INS-0${idx + 1}`,
@@ -332,8 +272,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
       return l.sessionToken
     })
 
-    // Tie-breaking & retry timestamp preservation on typing:
-    // Participant 1 achieves 1000 at t=08:01; Participant 2 achieves 1000 at t=08:05
     clockMs = Date.parse('2026-11-26T08:01:00Z')
     const p1Run1 = await store.startGameRun(tokens[0]!, 'typing', 'standard')
     const p1Sched1 = buildTypingSchedule(SAMPLE_CONTENT_V04, p1Run1.seed, 'standard')
@@ -364,8 +302,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
       endReason: 'completed_all',
     })
 
-    // Participant 1 retries at t=08:10 with equal score (1000) AND higher assisted score (1400):
-    // P1 must KEEP 08:01 timestamp and remain #1 ahead of P2, and standard score stays 1000!
     clockMs = Date.parse('2026-11-26T08:10:00Z')
     const p1TieRetry = await store.startGameRun(tokens[0]!, 'typing', 'standard')
     const p1SchedTie = buildTypingSchedule(SAMPLE_CONTENT_V04, p1TieRetry.seed, 'standard')
@@ -399,10 +335,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     expect(board.top10[0]!.score).toBe(20)
     expect(board.top10[1]!.nickname).toBe('참가자_2')
 
-    // Shooter item analytics threshold test on targetItem 'sht-c-1':
-    // - Participant 0: first exposure TIMEOUT (no selection yet)
-    // - Participants 1..4: 4 actual selections (1 wrong, 3 correct)
-    // => exposures = 5 (timeout column unlocked = 1!), responders = 4 (<5 -> selection metrics hidden!)
     const targetItemId = 'sht-c-1'
     for (let idx = 0; idx < 5; idx += 1) {
       const sRun = await store.startGameRun(tokens[idx]!, 'shooter', 'standard')
@@ -414,9 +346,9 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
         await store.finalizeGameRun(tokens[idx]!, sRun.runId, {
           events: [
             { seq: 1, t_ms: 1000, type: 'aim_start', itemId: targetItemId },
-            { seq: 2, t_ms: 7000, type: 'item_timeout', itemId: targetItemId, aimDurationMs: 6000 },
+            { seq: 2, t_ms: 11000, type: 'item_timeout', itemId: targetItemId, aimDurationMs: 10000 },
           ],
-          activeDurationMs: 10_000,
+          activeDurationMs: 12_000,
           endReason: 'time_up',
         })
       } else {
@@ -447,7 +379,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     expect(item4.responderCount).toBeNull()
     expect(item4.wrongRatePct).toBeNull()
 
-    // Now Participant 0 retries and makes first actual selection = WRONG (2nd wrong out of 5 responders = 40%!)
     const p0Retry1 = await store.startGameRun(tokens[0]!, 'shooter', 'standard')
     const p0Round1 = buildShooterRound(SAMPLE_CONTENT_V04, p0Retry1.seed)
     const p0Target1 = p0Round1.find((e) => e.item.id === targetItemId)!
@@ -468,7 +399,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
       endReason: 'time_up',
     })
 
-    // Participant 0 retries a 3rd time and answers CORRECT -> must NOT overwrite first exposure timeout OR first selection wrong!
     const p0Retry2 = await store.startGameRun(tokens[0]!, 'shooter', 'standard')
     const p0Round2 = buildShooterRound(SAMPLE_CONTENT_V04, p0Retry2.seed)
     const p0Target2 = p0Round2.find((e) => e.item.id === targetItemId)!
@@ -500,7 +430,6 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
   it('두 탭 동시 시작/제출 정합성 및 동시 30명 로그인·결과 저장 부하 리허설(누락·중복 0건, p95 < 2초)을 통과한다', async () => {
     const store = new ArcadeStore({ filePath: null, clock: () => new Date('2026-11-26T13:00:00Z') })
 
-    // 1) Two simultaneous tab starts on same participant -> exactly one 'first_attempt'
     const twoTabReg = store.registerParticipantByAdmin({
       rosterRef: 'TWOTAB-01',
       availableFromDate: '2026-11-20',
@@ -510,36 +439,33 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
     store.setParticipantNickname(tab1.sessionToken, '동시탭검증')
 
     const [startA, startB] = await Promise.all([
-      store.startGameRun(tab1.sessionToken, 'pinball', 'standard'),
-      store.startGameRun(tab2.sessionToken, 'pinball', 'standard'),
+      store.startGameRun(tab1.sessionToken, 'runner', 'standard'),
+      store.startGameRun(tab2.sessionToken, 'runner', 'standard'),
     ])
     const kinds = [startA.attemptKind, startB.attemptKind].sort()
     expect(kinds).toEqual(['first_attempt', 'retry_before_clear'])
 
-    // Two simultaneous clears -> newlyLitSocket is true on ONLY ONE of them!
-    const pinballClearEvents = (['C', 'O', 'R', 'E'] as const).map((letter, idx) => ({
+    const runnerClearEvents = (['C', 'O', 'R', 'E'] as const).map((letter, idx) => ({
       seq: idx + 1,
-      t_ms: (idx + 1) * 500,
-      type: 'bumper_hit' as const,
-      ballId: 1,
+      t_ms: (idx + 1) * 1000,
+      type: 'step_booster' as const,
+      padId: `pad-${idx + 1}`,
       letter,
-      separatedSinceLastHit: true,
     }))
     const [finA, finB] = await Promise.all([
       store.finalizeGameRun(tab1.sessionToken, startA.runId, {
-        events: pinballClearEvents,
+        events: runnerClearEvents,
         activeDurationMs: 12_000,
-        endReason: 'time_up',
+        endReason: 'course_finished',
       }),
       store.finalizeGameRun(tab2.sessionToken, startB.runId, {
-        events: pinballClearEvents,
+        events: runnerClearEvents,
         activeDurationMs: 12_000,
-        endReason: 'time_up',
+        endReason: 'course_finished',
       }),
     ])
     expect([finA.newlyLitSocket, finB.newlyLitSocket].filter(Boolean)).toHaveLength(1)
 
-    // 2) 30 concurrent participants login + nickname + start + finalize rehearsal
     const cohort = Array.from({ length: 30 }, (_, idx) =>
       store.registerParticipantByAdmin({
         rosterRef: `LOAD-${String(idx + 1).padStart(2, '0')}`,
@@ -552,16 +478,17 @@ describe('Stage 5 & 6 · 보너스 관제실·운영 집계·7절 인수 경계�
       cohort.map(async (reg, idx) => {
         const login = store.loginWithPersonalCode(reg.issuedCodeOnce, `load-ip-${idx}`)
         store.setParticipantNickname(login.sessionToken, `부하참가자_${idx + 1}`)
-        const run = await store.startGameRun(login.sessionToken, 'racing', 'standard')
+        const run = await store.startGameRun(login.sessionToken, 'runner', 'standard')
         const t0 = performance.now()
         const res = await store.finalizeGameRun(login.sessionToken, run.runId, {
-          events: Array.from({ length: 10 }, (_, v) => ({
+          events: Array.from({ length: 6 }, (_, v) => ({
             seq: v + 1,
             t_ms: (v + 1) * 2000,
-            type: 'overtake' as const,
-            vehicleId: `veh-${v + 1}`,
+            type: 'step_booster' as const,
+            padId: `pad-${v + 1}`,
+            letter: (['C', 'O', 'R', 'E'] as const)[v % 4]!,
           })),
-          activeDurationMs: 30_000,
+          activeDurationMs: 25_000,
           endReason: 'course_finished',
         })
         latenciesMs.push(performance.now() - t0)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildShooterRound, getContentBundle } from '../../../content'
 import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules'
-import type { GameMode, RunEndReason, ShooterRunEvent } from '../../domain/types'
+import type { CoreValueCode, GameMode, RunEndReason, ShooterRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
 import { playArcadeSfx } from '../../lib/sound'
 import { findHitTargetLane, TARGET_HITBOXES } from './hitboxes'
@@ -20,14 +20,27 @@ export interface ShooterGameProps {
   }) => void
 }
 
-type QuestionPhase = 'reading' | 'aiming' | 'feedback'
+type QuestionPhase = 'aiming' | 'feedback'
+
+const CORE_ACCENTS: Record<CoreValueCode, string> = {
+  C: '#43E7F2',
+  O: '#B9F66C',
+  R: '#FFBD64',
+  E: '#FF6B9E',
+}
+
+function getQuestionInstruction(promptKind: 'ko_name' | 'en_name' | 'description'): string {
+  if (promptKind === 'en_name') {
+    return '아래 영문 명칭이 뜻하는 LS전선 핵심가치(C·O·R·E) 표적을 맞히세요!'
+  }
+  return '아래 설명이 뜻하는 LS전선 핵심가치(C·O·R·E) 표적을 맞히세요!'
+}
 
 /**
- * 가치 표적 슈팅 (shooter)
- * - 12문항 (C·O·R·E 각 3문항, 세 위치에 정답 4회씩 균등 시드 배치), 8문항 이상 정답 시 클리어 (+100점/문항)
- * - 읽기 화면: 시간 압박 없이 문항과 고정된 3개 표적 확인 → '조준 시작' 시 6초(지원 9초) 카운트 시작
- * - 시작 키(Space)를 놓은 뒤의 Space 입력부터 발사하며, 빈 틈에 빗맞히면 남은 시간에 재발사 가능
- * - 오답 피드백에는 '내가 고른 가치'와 '정답 가치'의 승인 설명을 한 줄씩 함께 표시
+ * 필수 #3: 가치 표적 슈팅 (shooter) — 직관형 개편 버전
+ * - 별도의 '조준 시작' 대기 버튼을 없애고, 문제 카드가 상단에 크게 뜨면 곧바로 조준·발사 가능!
+ * - 조작 3가지 모두 지원: ① ←/→ 이동 후 Space 발사 ② 숫자키 1·2·3 즉시 발사 ③ 표적 마우스 클릭 즉시 발사
+ * - 12문항 (문항당 기본 10초 / 여유 14초), 정답당 +2점 · 5문항(10점) 이상 통과, 만점 24점 경쟁
  */
 export function ShooterGame({
   seed,
@@ -45,11 +58,11 @@ export function ShooterGame({
     return isPractice ? [full[0]!] : full
   }, [bundle, seed, isPractice])
 
-  const aimLimitMs = mode === 'assisted' ? 9_000 : 6_000
+  const aimLimitMs = mode === 'assisted' ? 14_000 : 10_000
   const maxActiveRoundMs = isPractice ? 30_000 : mode === 'assisted' ? 235_000 : 175_000
 
   const [questionIdx, setQuestionIdx] = useState(0)
-  const [phase, setPhase] = useState<QuestionPhase>('reading')
+  const [phase, setPhase] = useState<QuestionPhase>('aiming')
   const [aimElapsedMs, setAimElapsedMs] = useState(0)
   const [practiceElapsedMs, setPracticeElapsedMs] = useState(0)
   const [tabPaused, setTabPaused] = useState(false)
@@ -62,7 +75,6 @@ export function ShooterGame({
   const [feedbackData, setFeedbackData] = useState<{
     outcome: 'correct' | 'wrong' | 'timeout'
     chosenLabel: string | null
-    chosenExplanation: string | null
     correctLabel: string
     correctExplanation: string
   } | null>(null)
@@ -73,14 +85,35 @@ export function ShooterGame({
   const aimElapsedRef = useRef(0)
   const shipXRef = useRef(0.5)
   const keysHeldRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: false })
-  // Requires releasing the key used to start aiming before Space can fire!
-  const requireSpaceReleaseRef = useRef(false)
+  const mountGuardUntilRef = useRef(0)
   const seqRef = useRef(0)
   const eventsRef = useRef<ShooterRunEvent[]>([])
-  const phaseRef = useRef<QuestionPhase>('reading')
+  const startedItemIdsRef = useRef<Set<string>>(new Set())
+  const phaseRef = useRef<QuestionPhase>('aiming')
   const questionIdxRef = useRef(0)
 
   const currentScheduled = roundItems[questionIdx]!
+
+  const ensureAimStartedForCurrent = useCallback(() => {
+    if (isPractice) return
+    const current = roundItems[questionIdxRef.current]
+    if (!current) return
+    if (startedItemIdsRef.current.has(current.item.id)) return
+    startedItemIdsRef.current.add(current.item.id)
+    seqRef.current += 1
+    eventsRef.current.push({
+      seq: seqRef.current,
+      t_ms: Math.min(maxActiveRoundMs, Math.round(totalActiveMsRef.current)),
+      type: 'aim_start',
+      itemId: current.item.id,
+    })
+  }, [isPractice, maxActiveRoundMs, roundItems])
+
+  // Record aim_start for Question #1 on mount & guard accidental Space/Enter carryover for 350ms
+  useEffect(() => {
+    mountGuardUntilRef.current = performance.now() + 350
+    ensureAimStartedForCurrent()
+  }, [ensureAimStartedForCurrent])
 
   const finishOnce = useCallback(
     (reason: RunEndReason) => {
@@ -110,47 +143,21 @@ export function ShooterGame({
     return () => document.removeEventListener('visibilitychange', onVisChange)
   }, [])
 
-  const beginAiming = useCallback(
-    (triggeredBySpaceKey: boolean) => {
-      if (finishedRef.current || phaseRef.current !== 'reading') return
-      const current = roundItems[questionIdxRef.current]!
-      playArcadeSfx('start')
-      aimElapsedRef.current = 0
-      setAimElapsedMs(0)
-      setMissNotice(null)
-      requireSpaceReleaseRef.current = triggeredBySpaceKey
-
-      if (!isPractice) {
-        seqRef.current += 1
-        eventsRef.current.push({
-          seq: seqRef.current,
-          t_ms: Math.min(maxActiveRoundMs, Math.round(totalActiveMsRef.current)),
-          type: 'aim_start',
-          itemId: current.item.id,
-        })
-      }
-
-      phaseRef.current = 'aiming'
-      setPhase('aiming')
-    },
-    [isPractice, maxActiveRoundMs, roundItems],
-  )
-
   const finalizeCurrentQuestion = useCallback(
     (selectedLane: 0 | 1 | 2 | null) => {
       if (finishedRef.current || phaseRef.current !== 'aiming') return
+      ensureAimStartedForCurrent()
       const current = roundItems[questionIdxRef.current]!
       const aimDuration = Math.min(aimLimitMs, Math.round(aimElapsedRef.current))
       const nowActiveMs = Math.min(maxActiveRoundMs, Math.round(totalActiveMsRef.current))
       const correctRec = bundle.records[current.item.correct_id]!
 
       if (selectedLane === null) {
-        // Timeout
         playArcadeSfx('wrong')
         if (isPractice) {
-          phaseRef.current = 'reading'
-          setPhase('reading')
-          setMissNotice('조준 시간이 지났습니다. 다시 조준 시작을 눌러 정답 표적을 맞혀 보세요!')
+          aimElapsedRef.current = 0
+          setAimElapsedMs(0)
+          setMissNotice('제한 시간이 지났습니다! 상단 문제를 보고 알맞은 표적(1·2·3번)을 클릭하거나 Space로 쏘세요.')
           return
         }
         seqRef.current += 1
@@ -164,7 +171,6 @@ export function ShooterGame({
         setFeedbackData({
           outcome: 'timeout',
           chosenLabel: null,
-          chosenExplanation: null,
           correctLabel: correctRec.display_ko,
           correctExplanation: current.item.explanation,
         })
@@ -185,7 +191,7 @@ export function ShooterGame({
         } else {
           playArcadeSfx('wrong')
           setMissNotice(
-            `오답 표적(${chosenRec.display_ko})입니다! 설명에 맞는 정답 표적으로 이동해 다시 쏴 보세요.`,
+            `방금 쏜 [${chosenRec.display_ko}] 표적은 오답입니다! 상단 문제에 맞는 표적을 다시 쏴 보세요.`,
           )
         }
         return
@@ -207,7 +213,6 @@ export function ShooterGame({
         setFeedbackData({
           outcome: 'correct',
           chosenLabel: chosenRec.display_ko,
-          chosenExplanation: chosenRec.explanation,
           correctLabel: correctRec.display_ko,
           correctExplanation: current.item.explanation,
         })
@@ -216,27 +221,34 @@ export function ShooterGame({
         setFeedbackData({
           outcome: 'wrong',
           chosenLabel: chosenRec.display_ko,
-          chosenExplanation: chosenRec.explanation,
           correctLabel: correctRec.display_ko,
-          correctExplanation: correctRec.explanation,
+          correctExplanation: current.item.explanation,
         })
       }
 
       phaseRef.current = 'feedback'
       setPhase('feedback')
     },
-    [aimLimitMs, bundle.records, isPractice, maxActiveRoundMs, onPracticeSuccess, roundItems],
+    [
+      aimLimitMs,
+      bundle.records,
+      ensureAimStartedForCurrent,
+      isPractice,
+      maxActiveRoundMs,
+      onPracticeSuccess,
+      roundItems,
+    ],
   )
 
   const fireLaserAtX = useCallback(
     (xPos: number) => {
       if (finishedRef.current || phaseRef.current !== 'aiming' || practiceCleared) return
+      ensureAimStartedForCurrent()
       const hitLane = findHitTargetLane(xPos)
       setLaserBeam({ x: xPos, hit: hitLane !== null })
-      window.setTimeout(() => setLaserBeam(null), 190)
+      window.setTimeout(() => setLaserBeam(null), 200)
 
       if (hitLane === null) {
-        // Shot went between targets -> record shot_miss, allow shooting again in remaining time!
         playArcadeSfx('select')
         const current = roundItems[questionIdxRef.current]!
         if (!isPractice) {
@@ -248,13 +260,31 @@ export function ShooterGame({
             itemId: current.item.id,
           })
         }
-        setMissNotice('빗맞았습니다! 표적 중앙 아래로 이동해 남은 시간 안에 다시 Space를 누르세요.')
+        setMissNotice('표적 사이 빈 공간에 발사되었습니다! 1·2·3번 표적 아래에서 쏘거나 숫자키 1·2·3을 눌러 보세요.')
         return
       }
 
       finalizeCurrentQuestion(hitLane)
     },
-    [finalizeCurrentQuestion, isPractice, maxActiveRoundMs, practiceCleared, roundItems],
+    [
+      ensureAimStartedForCurrent,
+      finalizeCurrentQuestion,
+      isPractice,
+      maxActiveRoundMs,
+      practiceCleared,
+      roundItems,
+    ],
+  )
+
+  const snapAndFireLane = useCallback(
+    (lane: 0 | 1 | 2) => {
+      if (finishedRef.current || phaseRef.current !== 'aiming' || practiceCleared) return
+      const box = TARGET_HITBOXES[lane]!
+      shipXRef.current = box.centerX
+      setShipX(box.centerX)
+      fireLaserAtX(box.centerX)
+    },
+    [fireLaserAtX, practiceCleared],
   )
 
   const goNextQuestion = useCallback(() => {
@@ -268,13 +298,16 @@ export function ShooterGame({
     setQuestionIdx(nextIdx)
     setFeedbackData(null)
     setMissNotice(null)
+    aimElapsedRef.current = 0
+    setAimElapsedMs(0)
     shipXRef.current = 0.5
     setShipX(0.5)
-    phaseRef.current = 'reading'
-    setPhase('reading')
-  }, [finishOnce, roundItems.length])
+    phaseRef.current = 'aiming'
+    setPhase('aiming')
+    ensureAimStartedForCurrent()
+  }, [ensureAimStartedForCurrent, finishOnce, roundItems.length])
 
-  // Keyboard listener with start-key release protection on Space!
+  // Keyboard controls: Left/Right glide, 1/2/3 quick-aim & fire, Space/Enter fire or next
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (finishedRef.current || tabPaused || practiceCleared) return
@@ -287,17 +320,20 @@ export function ShooterGame({
         e.preventDefault()
         e.stopPropagation()
         keysHeldRef.current.right = true
+      } else if (e.key === '1' || e.key === '2' || e.key === '3') {
+        if (phaseRef.current === 'aiming' && !e.repeat) {
+          e.preventDefault()
+          e.stopPropagation()
+          const lane = (Number(e.key) - 1) as 0 | 1 | 2
+          snapAndFireLane(lane)
+        }
       } else if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault()
         e.stopPropagation()
         if (e.repeat) return
+        if (performance.now() < mountGuardUntilRef.current) return
 
-        if (phaseRef.current === 'reading') {
-          beginAiming(e.key === ' ')
-          return
-        }
-        if (phaseRef.current === 'aiming' && e.key === ' ') {
-          if (requireSpaceReleaseRef.current) return
+        if (phaseRef.current === 'aiming') {
           fireLaserAtX(shipXRef.current)
           return
         }
@@ -312,8 +348,6 @@ export function ShooterGame({
         keysHeldRef.current.left = false
       } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
         keysHeldRef.current.right = false
-      } else if (e.key === ' ') {
-        requireSpaceReleaseRef.current = false
       }
     }
 
@@ -323,9 +357,9 @@ export function ShooterGame({
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [beginAiming, fireLaserAtX, goNextQuestion, practiceCleared, tabPaused])
+  }, [fireLaserAtX, goNextQuestion, practiceCleared, snapAndFireLane, tabPaused])
 
-  // Active time + ship movement + aim timer loop
+  // Active time + ship movement + question timer loop
   useEffect(() => {
     if (tabPaused || practiceCleared || finishedRef.current) return
     let lastTs = performance.now()
@@ -348,20 +382,16 @@ export function ShooterGame({
         return
       }
 
-      // Smooth horizontal ship movement in reading & aiming
-      if (phaseRef.current === 'reading' || phaseRef.current === 'aiming') {
+      if (phaseRef.current === 'aiming') {
         const dir =
           (keysHeldRef.current.right ? 1 : 0) - (keysHeldRef.current.left ? 1 : 0)
         if (dir !== 0) {
-          const speedPerMs = 0.00072
-          const nextX = Math.min(0.95, Math.max(0.05, shipXRef.current + dir * speedPerMs * dt))
+          const speedPerMs = 0.00082
+          const nextX = Math.min(0.94, Math.max(0.06, shipXRef.current + dir * speedPerMs * dt))
           shipXRef.current = nextX
           setShipX(nextX)
         }
-      }
 
-      // Aim countdown runs ONLY in 'aiming' phase!
-      if (phaseRef.current === 'aiming') {
         const nextAim = aimElapsedRef.current + dt
         aimElapsedRef.current = nextAim
         setAimElapsedMs(nextAim)
@@ -376,9 +406,17 @@ export function ShooterGame({
 
     rafId = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(rafId)
-  }, [aimLimitMs, finalizeCurrentQuestion, finishOnce, isPractice, maxActiveRoundMs, practiceCleared, tabPaused])
+  }, [
+    aimLimitMs,
+    finalizeCurrentQuestion,
+    finishOnce,
+    isPractice,
+    maxActiveRoundMs,
+    practiceCleared,
+    tabPaused,
+  ])
 
-  // Draw 2D Canvas shooter arena (3 target pods + aiming reticle + laser + ship)
+  // Unified Shooter Arena Canvas (3 Giant Readable Target Shields + Lock-On + Laser Turret)
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -387,14 +425,18 @@ export function ShooterGame({
 
     const w = canvas.width
     const h = canvas.height
-    ctx.fillStyle = '#090e18'
+
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, h)
+    bgGrad.addColorStop(0, '#070d18')
+    bgGrad.addColorStop(1, '#0b1424')
+    ctx.fillStyle = bgGrad
     ctx.fillRect(0, 0, w, h)
 
-    // Star / grid horizon lines
-    ctx.strokeStyle = 'rgba(67, 231, 242, 0.09)'
+    // Subtle cyber grid lines
+    ctx.strokeStyle = 'rgba(67, 231, 242, 0.08)'
     ctx.lineWidth = 1
-    for (let i = 1; i <= 4; i += 1) {
-      const y = (h / 5) * i
+    for (let i = 1; i <= 5; i += 1) {
+      const y = (h / 6) * i
       ctx.beginPath()
       ctx.moveTo(0, y)
       ctx.lineTo(w, y)
@@ -402,115 +444,153 @@ export function ShooterGame({
     }
 
     const activeHoverLane = findHitTargetLane(shipX)
+    const shipPx = shipX * w
+    const shipPy = h - 38
 
-    // Draw the 3 target pods matching the 3 option cards directly above
+    // Vertical laser sight line BEFORE targets so it connects ship to shield
+    ctx.strokeStyle =
+      activeHoverLane !== null ? 'rgba(185, 246, 108, 0.68)' : 'rgba(67, 231, 242, 0.35)'
+    ctx.lineWidth = activeHoverLane !== null ? 2.4 : 1.5
+    ctx.setLineDash([7, 6])
+    ctx.beginPath()
+    ctx.moveTo(shipPx, shipPy - 22)
+    ctx.lineTo(shipPx, 132)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // Draw 3 Large Target Shields (no duplicate HTML cards needed!)
     for (const box of TARGET_HITBOXES) {
       const opt = currentScheduled.options[box.lane]
       const x0 = box.minX * w
       const podW = (box.maxX - box.minX) * w
       const podY = 18
-      const podH = 62
-      const isHovered = activeHoverLane === box.lane
+      const podH = 122
+      const centerX = box.centerX * w
+      const isLocked = activeHoverLane === box.lane
+      const accent = opt.coreCode ? CORE_ACCENTS[opt.coreCode] : '#43E7F2'
 
-      ctx.fillStyle = isHovered ? '#172b42' : '#121b2b'
-      ctx.strokeStyle = isHovered ? '#43E7F2' : 'rgba(242, 246, 251, 0.32)'
-      ctx.lineWidth = isHovered ? 3 : 1.5
+      // Outer Target Shield Card
+      ctx.save()
+      if (isLocked) {
+        ctx.shadowColor = accent
+        ctx.shadowBlur = 16
+      }
+      ctx.fillStyle = isLocked ? '#162b44' : '#101a2b'
+      ctx.strokeStyle = isLocked ? accent : 'rgba(242, 246, 251, 0.28)'
+      ctx.lineWidth = isLocked ? 3.5 : 1.8
       ctx.beginPath()
-      ctx.roundRect(x0, podY, podW, podH, 10)
+      ctx.roundRect(x0, podY, podW, podH, 14)
       ctx.fill()
       ctx.stroke()
+      ctx.restore()
 
-      ctx.fillStyle = isHovered ? '#43E7F2' : '#F2F6FB'
-      ctx.font = '800 18px "IBM Plex Mono", Pretendard, sans-serif'
+      // Top Shortcut Pill ("숫자 1번 / 클릭")
+      ctx.fillStyle = isLocked ? accent : 'rgba(242, 246, 251, 0.12)'
+      ctx.beginPath()
+      ctx.roundRect(centerX - 66, podY + 10, 132, 22, 11)
+      ctx.fill()
+
+      ctx.fillStyle = isLocked ? '#07121c' : '#A6B4C8'
+      ctx.font = '800 12px Pretendard, "Malgun Gothic", sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText(
-        opt.coreCode ? `[${opt.coreCode}] 표적` : `표적 ${box.lane + 1}`,
-        box.centerX * w,
-        podY + 24,
+        isLocked ? `🎯 ${box.lane + 1}번 조준됨 · 발사!` : `${box.lane + 1}번 표적 (숫자키 ${box.lane + 1})`,
+        centerX,
+        podY + 21,
       )
 
-      ctx.fillStyle = '#A6B4C8'
+      // Core Value Letter + Korean Name
+      ctx.fillStyle = isLocked ? accent : '#F2F6FB'
+      ctx.font = '800 20px Pretendard, "Malgun Gothic", sans-serif'
+      ctx.fillText(opt.labelKo, centerX, podY + 62)
+
+      // English Subtitle
+      ctx.fillStyle = '#9FB0C7'
       ctx.font = '600 13px Pretendard, "Malgun Gothic", sans-serif'
-      ctx.fillText(opt.labelKo, box.centerX * w, podY + 46)
-    }
+      ctx.fillText(opt.labelEn, centerX, podY + 92)
 
-    // Aiming vertical guide line from ship
-    const shipPx = shipX * w
-    const shipPy = h - 34
-    ctx.strokeStyle =
-      phase === 'aiming' ? 'rgba(67, 231, 242, 0.55)' : 'rgba(242, 246, 251, 0.18)'
-    ctx.lineWidth = 1.5
-    ctx.setLineDash([5, 5])
-    ctx.beginPath()
-    ctx.moveTo(shipPx, shipPy - 18)
-    ctx.lineTo(shipPx, 82)
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    // Laser beam flash
-    if (laserBeam && !prefs.reduceMotion) {
-      ctx.strokeStyle = laserBeam.hit ? '#B9F66C' : '#FFBD64'
-      ctx.lineWidth = 5
+      // Bottom Bullseye Connector Node
+      ctx.fillStyle = isLocked ? '#B9F66C' : accent
       ctx.beginPath()
-      ctx.moveTo(laserBeam.x * w, shipPy - 16)
-      ctx.lineTo(laserBeam.x * w, laserBeam.hit ? 78 : 10)
-      ctx.stroke()
+      ctx.arc(centerX, podY + podH, isLocked ? 8 : 5.5, 0, Math.PI * 2)
+      ctx.fill()
     }
 
-    // Player Arcade Ship
-    ctx.fillStyle = phase === 'aiming' ? '#43E7F2' : '#7f93b0'
+    // Fired Laser Beam Effect
+    if (laserBeam && !prefs.reduceMotion) {
+      ctx.save()
+      ctx.strokeStyle = laserBeam.hit ? '#B9F66C' : '#FFBD64'
+      ctx.shadowColor = laserBeam.hit ? '#B9F66C' : '#FFBD64'
+      ctx.shadowBlur = 18
+      ctx.lineWidth = 7
+      ctx.beginPath()
+      ctx.moveTo(laserBeam.x * w, shipPy - 20)
+      ctx.lineTo(laserBeam.x * w, laserBeam.hit ? 140 : 12)
+      ctx.stroke()
+      ctx.restore()
+    }
+
+    // Player Laser Cannon Ship
+    ctx.save()
+    ctx.translate(shipPx, shipPy)
+    ctx.fillStyle = activeHoverLane !== null ? '#B9F66C' : '#43E7F2'
+    ctx.strokeStyle = '#08131E'
+    ctx.lineWidth = 2
     ctx.beginPath()
-    ctx.moveTo(shipPx, shipPy - 18)
-    ctx.lineTo(shipPx - 20, shipPy + 14)
-    ctx.lineTo(shipPx + 20, shipPy + 14)
+    ctx.moveTo(0, -24)
+    ctx.lineTo(-24, 16)
+    ctx.lineTo(-8, 10)
+    ctx.lineTo(8, 10)
+    ctx.lineTo(24, 16)
     ctx.closePath()
     ctx.fill()
-  }, [currentScheduled, laserBeam, phase, prefs.reduceMotion, shipX])
+    ctx.stroke()
+
+    ctx.fillStyle = '#F2F6FB'
+    ctx.beginPath()
+    ctx.arc(0, -4, 5, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }, [currentScheduled, laserBeam, prefs.reduceMotion, shipX])
 
   const aimRemainingSec = Math.max(0, (aimLimitMs - aimElapsedMs) / 1000).toFixed(1)
+  const timerRatio = Math.max(0, Math.min(1, 1 - aimElapsedMs / aimLimitMs))
   const score = correctCount * BASE_ACTION_POINTS
   const cleared = score >= PASSING_SCORE
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 8 }}>
-      {/* HUD */}
-      <div className="play-hud-bar">
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
+      {/* Top HUD */}
+      <div className="play-hud-bar" style={{ marginBottom: 0 }}>
         <div className="hud-metric">
-          <span style={{ color: 'var(--text-muted)' }}>통과 목표 ({PASSING_SCORE}점)</span>
+          <span style={{ color: 'var(--text-muted)' }}>통과 기준 ({PASSING_SCORE}점)</span>
           <strong style={{ color: cleared ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
             {isPractice
               ? `연습 명중 ${practiceCleared ? 1 : 0}/1`
               : cleared
                 ? `✓ 통과 달성! · 정답 ${correctCount}개 (24점 만점 도전 중)`
-                : `정답 명중 ${correctCount}/5 (${score}/${PASSING_SCORE}점)`}
+                : `정답 ${correctCount}/5문항 (${score}/${PASSING_SCORE}점)`}
           </strong>
-          {!isPractice && (
-            <span className="mono-num" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              (문항 {questionIdx + 1}/12)
-            </span>
-          )}
         </div>
 
         <div className="hud-metric" style={{ justifyContent: 'center' }}>
           <span style={{ color: 'var(--text-muted)' }}>
-            {isPractice ? '연습 남은 시간' : phase === 'aiming' ? '조준 타이머' : '조준 대기'}
+            {isPractice ? '연습 남은 시간' : `문제 ${questionIdx + 1} / 12 · 남은 시간`}
           </span>
           <span
             className="mono-num"
             style={{
               fontSize: 20,
               color:
-                phase === 'aiming' && Number(aimRemainingSec) <= 2.0
+                !isPractice && Number(aimRemainingSec) <= 3.0
                   ? 'var(--accent-warn)'
                   : 'var(--text-primary)',
             }}
           >
             {isPractice
               ? `${Math.max(0, Math.ceil((30_000 - practiceElapsedMs) / 1000))}s`
-              : phase === 'aiming'
-                ? `${aimRemainingSec}s`
-                : `읽기 중 (${aimLimitMs / 1000}s 보존)`}
+              : `${aimRemainingSec}s`}
           </span>
         </div>
 
@@ -526,84 +606,98 @@ export function ShooterGame({
         </div>
       </div>
 
-      {/* Question Prompt Card */}
-      <div
+      {/* Prominent High-Visibility Question Banner */}
+      <section
+        aria-label="현재 출제 문제"
         style={{
-          padding: '10px 16px',
-          background: '#141d2b',
-          border: '1px solid rgba(67, 231, 242, 0.35)',
-          borderRadius: 9,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 14,
+          padding: '14px 18px 12px',
+          background: 'linear-gradient(180deg, #16263d 0%, #101b2d 100%)',
+          border: '2px solid var(--accent-select)',
+          borderRadius: 12,
+          boxShadow: '0 0 20px rgba(67, 231, 242, 0.16)',
         }}
       >
-        <div>
-          <div style={{ fontSize: 12, color: 'var(--accent-select)', fontWeight: 700 }}>
-            핵심가치 식별 문항 {isPractice ? '(연습)' : `#${questionIdx + 1}`}
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 800, marginTop: 2 }}>
-            “{currentScheduled.item.prompt}”
-          </div>
-        </div>
-
-        {phase === 'reading' && !practiceCleared && (
-          <button
-            type="button"
-            className="btn-arcade btn-start"
-            onClick={() => beginAiming(false)}
-          >
-            조준 시작 ({aimLimitMs / 1000}초) · Enter/Space ▶
-          </button>
-        )}
-      </div>
-
-      {/* 3 Full-Text Option Cards (1366x768 non-truncating!) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-        {currentScheduled.options.map((opt) => {
-          const box = TARGET_HITBOXES[opt.lane]!
-          const isAimed = findHitTargetLane(shipX) === opt.lane
-          return (
-            <button
-              key={opt.lane}
-              type="button"
-              disabled={phase === 'feedback' || practiceCleared}
-              onClick={() => {
-                shipXRef.current = box.centerX
-                setShipX(box.centerX)
-                if (phase === 'aiming') {
-                  fireLaserAtX(box.centerX)
-                }
-              }}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            marginBottom: 6,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
               style={{
-                textAlign: 'left',
-                padding: '9px 12px',
-                borderRadius: 8,
-                background: isAimed ? 'rgba(67, 231, 242, 0.14)' : '#121926',
-                border: `1.5px solid ${isAimed ? 'var(--accent-select)' : 'rgba(242,246,251,0.16)'}`,
-                cursor: phase === 'aiming' ? 'crosshair' : 'pointer',
+                padding: '3px 10px',
+                borderRadius: 999,
+                background: 'var(--accent-select)',
+                color: '#06121c',
+                fontWeight: 800,
+                fontSize: 13,
               }}
             >
-              <div style={{ fontSize: 12, color: 'var(--accent-select)', fontWeight: 700 }}>
-                표적 {opt.lane + 1} {isAimed ? '· [조준선 위치]' : ''}
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>{opt.labelKo}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{opt.labelEn}</div>
-            </button>
-          )
-        })}
-      </div>
+              {isPractice ? '연습 문제' : `Q${questionIdx + 1} / 12`}
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#bfefff' }}>
+              {getQuestionInstruction(currentScheduled.item.promptKind)}
+            </span>
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            표적 클릭 · 숫자키 1·2·3 · ←→ + Space 발사
+          </span>
+        </div>
 
-      {/* 2D Shooter Canvas + Feedback / Pause Overlays */}
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: 8,
+            background: 'rgba(7, 13, 24, 0.72)',
+            border: '1px solid rgba(255, 255, 255, 0.14)',
+            fontSize: 21,
+            fontWeight: 800,
+            lineHeight: 1.4,
+            color: '#ffffff',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          “{currentScheduled.item.prompt}”
+        </div>
+
+        {/* Visual Countdown Bar */}
+        {!isPractice && (
+          <div
+            style={{
+              marginTop: 9,
+              height: 5,
+              borderRadius: 999,
+              background: 'rgba(255, 255, 255, 0.1)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${timerRatio * 100}%`,
+                height: '100%',
+                background:
+                  timerRatio <= 0.3 ? 'var(--accent-warn)' : 'var(--accent-select)',
+                transition: 'width 0.08s linear',
+              }}
+            />
+          </div>
+        )}
+      </section>
+
+      {/* Unified Shooter Canvas + Feedback Overlay */}
       <div
         style={{
           position: 'relative',
           flex: 1,
-          minHeight: 225,
-          background: '#090e18',
-          border: '1px solid rgba(67, 231, 242, 0.25)',
-          borderRadius: 10,
+          minHeight: 300,
+          background: '#080e1a',
+          border: '1px solid rgba(67, 231, 242, 0.28)',
+          borderRadius: 12,
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -611,24 +705,27 @@ export function ShooterGame({
       >
         <canvas
           ref={canvasRef}
-          width={920}
-          height={275}
+          width={1040}
+          height={330}
           onMouseMove={(e) => {
             if (phase === 'feedback' || tabPaused || practiceCleared) return
             const rect = e.currentTarget.getBoundingClientRect()
-            const normX = Math.min(0.95, Math.max(0.05, (e.clientX - rect.left) / rect.width))
+            const normX = Math.min(0.94, Math.max(0.06, (e.clientX - rect.left) / rect.width))
             shipXRef.current = normX
             setShipX(normX)
           }}
           onClick={(e) => {
             if (tabPaused || practiceCleared) return
-            if (phase === 'reading') {
-              beginAiming(false)
+            if (phase === 'feedback') {
+              goNextQuestion()
               return
             }
-            if (phase === 'aiming') {
-              const rect = e.currentTarget.getBoundingClientRect()
-              const normX = Math.min(0.95, Math.max(0.05, (e.clientX - rect.left) / rect.width))
+            const rect = e.currentTarget.getBoundingClientRect()
+            const normX = Math.min(0.94, Math.max(0.06, (e.clientX - rect.left) / rect.width))
+            const lane = findHitTargetLane(normX)
+            if (lane !== null) {
+              snapAndFireLane(lane)
+            } else {
               shipXRef.current = normX
               setShipX(normX)
               fireLaserAtX(normX)
@@ -641,50 +738,76 @@ export function ShooterGame({
             display: 'block',
             cursor: phase === 'aiming' ? 'crosshair' : 'pointer',
           }}
-          aria-label="가치 표적 슈팅 조준 화면 (마우스 이동 및 클릭 발사 지원)"
+          aria-label="가치 표적 슈팅 화면 (1, 2, 3번 표적 클릭 또는 방향키와 Space로 발사)"
         />
 
-        {/* Feedback Overlay: Correct / Wrong (shows both chosen & correct descriptions!) / Timeout */}
+        {isPractice && practiceCleared && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(11, 15, 23, 0.9)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              zIndex: 12,
+            }}
+          >
+            <span className="cabinet-status-tag cleared" style={{ fontSize: 15 }}>
+              ✓ 연습 명중 완료!
+            </span>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>
+              정답 표적을 정확히 맞혔습니다! 상단 [본게임 시작 ▶] 버튼을 눌러 12문제에 도전하세요.
+            </div>
+          </div>
+        )}
+
         {phase === 'feedback' && feedbackData && (
           <div
             role="dialog"
             aria-label="문항 정오답 해설"
+            onClick={goNextQuestion}
             style={{
               position: 'absolute',
               inset: 0,
-              background: 'rgba(11, 15, 23, 0.93)',
+              background: 'rgba(9, 14, 24, 0.92)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: 14,
+              padding: 16,
               zIndex: 12,
+              cursor: 'pointer',
             }}
           >
-            <div className="cabinet-modal-card" style={{ maxWidth: 640, padding: '16px 20px' }}>
-              <div style={{ marginBottom: 8 }}>
+            <div
+              className="cabinet-modal-card"
+              style={{ maxWidth: 620, padding: '18px 22px' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: 10 }}>
                 {feedbackData.outcome === 'correct' ? (
-                  <span className="cabinet-status-tag cleared">
-                    ✓ 정답 명중 (+{BASE_ACTION_POINTS}점)
+                  <span className="cabinet-status-tag cleared" style={{ fontSize: 14 }}>
+                    ⭕ 정답 명중! (+{BASE_ACTION_POINTS}점)
                   </span>
                 ) : feedbackData.outcome === 'timeout' ? (
-                  <span className="sample-pill">⏳ 조준 시간 초과 (0점)</span>
+                  <span className="sample-pill" style={{ fontSize: 14 }}>
+                    ⏳ 시간 초과 (0점)
+                  </span>
                 ) : (
-                  <span className="sample-pill">✕ 오답 명중 (0점)</span>
+                  <span className="sample-pill" style={{ fontSize: 14 }}>
+                    ❌ 오답 명중 · 내 선택: {feedbackData.chosenLabel}
+                  </span>
                 )}
               </div>
 
-              <div style={{ display: 'grid', gap: 8, marginBottom: 14 }} className="instruction-text">
-                {feedbackData.outcome === 'wrong' && feedbackData.chosenLabel && (
-                  <div style={{ color: 'var(--accent-warn)' }}>
-                    <strong>내가 고른 가치 ({feedbackData.chosenLabel}):</strong>{' '}
-                    {feedbackData.chosenExplanation}
-                  </div>
-                )}
-                <div style={{ color: 'var(--accent-clear)' }}>
-                  <strong>정답 가치 ({feedbackData.correctLabel}):</strong>{' '}
-                  {feedbackData.correctExplanation}
-                </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent-clear)', marginBottom: 6 }}>
+                정답: {feedbackData.correctLabel}
               </div>
+              <p className="instruction-text" style={{ margin: '0 0 16px', fontSize: 15 }}>
+                {feedbackData.correctExplanation}
+              </p>
 
               <button
                 type="button"
@@ -693,8 +816,8 @@ export function ShooterGame({
                 onClick={goNextQuestion}
               >
                 {questionIdx >= roundItems.length - 1
-                  ? '12문항 완료 · 결과 저장하기 (Enter/Space) ▶'
-                  : '다음 문항으로 (Enter/Space) ▶'}
+                  ? '12문제 완료 · 결과 확인하기 (Space / 클릭) ▶'
+                  : '다음 문제 바로 가기 (Space / 클릭) ▶'}
               </button>
             </div>
           </div>
@@ -726,22 +849,39 @@ export function ShooterGame({
         )}
       </div>
 
-      {/* Bottom Guidance Bar */}
+      {/* Quick Target Trigger Buttons + Status Tip */}
       <div
         style={{
-          padding: '6px 12px',
-          background: '#131b28',
-          borderRadius: 8,
-          border: '1px solid var(--border-subtle)',
-          fontSize: 14,
-          color: missNotice ? 'var(--accent-warn)' : 'var(--text-muted)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+          gap: 8,
         }}
       >
-        {missNotice ??
-          (phase === 'reading'
-            ? '설명을 충분히 읽은 뒤 [조준 시작]을 누르면 카운트가 시작됩니다.'
-            : '← · → 방향키로 우주선을 정답 표적 아래로 옮기고 Space로 발사하세요!')}
+        {currentScheduled.options.map((opt) => (
+          <button
+            key={opt.lane}
+            type="button"
+            className="btn-arcade"
+            disabled={phase !== 'aiming' || practiceCleared || tabPaused}
+            onClick={() => snapAndFireLane(opt.lane)}
+            style={{ justifyContent: 'space-between', padding: '8px 12px' }}
+          >
+            <span>
+              <strong style={{ color: 'var(--accent-select)' }}>{opt.lane + 1}번 발사</strong> ·{' '}
+              {opt.labelKo}
+            </span>
+            <span className="mono-num" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              [{opt.lane + 1}]
+            </span>
+          </button>
+        ))}
       </div>
+
+      {missNotice && (
+        <div className="status-alert warn" style={{ padding: '7px 12px' }}>
+          <span>💡 {missNotice}</span>
+        </div>
+      )}
     </div>
   )
 }

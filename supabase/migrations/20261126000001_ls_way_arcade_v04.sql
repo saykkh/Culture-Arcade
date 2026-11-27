@@ -61,7 +61,7 @@ create index if not exists participant_sessions_participant_idx
 create table if not exists public.game_runs (
   id uuid primary key default gen_random_uuid(),
   participant_id uuid not null references public.participants(id) on delete cascade,
-  game_id text not null check (game_id in ('typing', 'snake', 'shooter', 'racing', 'pinball', 'control-room')),
+  game_id text not null check (game_id in ('typing', 'snake', 'shooter', 'runner')),
   mode text not null check (mode in ('standard', 'assisted')),
   rule_version text not null,
   content_version text not null,
@@ -73,15 +73,11 @@ create table if not exists public.game_runs (
   expires_at timestamptz not null,
   finalized_at timestamptz,
   end_reason text,
-  render_mode text check (render_mode is null or render_mode in ('3d', 'simplified', 'panel-list')),
   active_duration_ms integer check (active_duration_ms is null or active_duration_ms >= 0),
   score integer check (score is null or score >= 0),
   cleared boolean,
   action_summary jsonb,
-  finalized_response jsonb,
-  constraint game_runs_bonus_mode_check check (
-    game_id <> 'control-room' or mode = 'standard'
-  )
+  finalized_response jsonb
 );
 
 create index if not exists game_runs_participant_game_idx
@@ -89,7 +85,7 @@ create index if not exists game_runs_participant_game_idx
 
 create table if not exists public.game_progress (
   participant_id uuid not null references public.participants(id) on delete cascade,
-  game_id text not null check (game_id in ('typing', 'snake', 'shooter', 'racing', 'pinball', 'control-room')),
+  game_id text not null check (game_id in ('typing', 'snake', 'shooter', 'runner')),
   standard_best_score integer,
   standard_best_achieved_at timestamptz,
   assisted_best_score integer,
@@ -110,7 +106,7 @@ create index if not exists game_progress_leaderboard_idx
 create table if not exists public.first_item_responses (
   participant_id uuid not null references public.participants(id) on delete cascade,
   content_version text not null,
-  game_id text not null check (game_id in ('shooter', 'control-room')),
+  game_id text not null check (game_id in ('shooter')),
   item_id text not null,
   first_outcome text not null check (first_outcome in ('correct', 'wrong', 'timeout')),
   is_correct boolean,

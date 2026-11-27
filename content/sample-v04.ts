@@ -448,69 +448,10 @@ export const SAMPLE_CONTENT_V04: LearningContentBundle = {
       source_ref: WAY_SOURCE,
     },
   ],
-  racing: {
-    missionRecordId: 'mission-cable-future',
-    visionRecordId: 'vision-global-leader',
-    coreSummaryRecordId: 'core-summary',
-  },
-  pinballBumpers: [
-    { letter: 'C', recordId: 'core-c' },
-    { letter: 'O', recordId: 'core-o' },
-    { letter: 'R', recordId: 'core-r' },
-    { letter: 'E', recordId: 'core-e' },
-  ],
-  controlRoomStages: [
-    {
-      stageIndex: 0,
-      clueId: 'ctrl-clue-1',
-      deviceName: '비상 조명 제어기',
-      unlockedRevealText: '비상 조명이 복구되어 벽면 회로도의 두 번째 단서가 드러났습니다.',
-      cluePrompt:
-        '중앙 콘솔 단서 01: "모든 판단의 기준을 고객 가치와 현장 신뢰에 두고 약속한 품질을 끝까지 지킨다." 일치하는 C.O.R.E. 패널을 복구하세요.',
-      correctPanelCode: 'C',
-      recordId: 'core-c',
-      wrongHint:
-        '힌트: 현장의 신뢰와 고객에게 약속한 품질을 가장 먼저 챙기는 가치를 확인해 보세요.',
-      source_ref: WAY_SOURCE,
-    },
-    {
-      stageIndex: 1,
-      clueId: 'ctrl-clue-2',
-      deviceName: '주 전력 회로도',
-      unlockedRevealText: '회로도에 전류가 흐르며 신호 수신기의 세 번째 단서가 활성화되었습니다.',
-      cluePrompt:
-        '회로도 단서 02: "부서와 역할의 경계를 넘어 투명하게 소통하고 하나의 팀으로 시너지를 만든다." 일치하는 C.O.R.E. 패널을 복구하세요.',
-      correctPanelCode: 'O',
-      recordId: 'core-o',
-      wrongHint:
-        '힌트: 부서 간 장벽을 허물고 하나의 팀(One Team)으로 협력하는 가치를 찾아보세요.',
-      source_ref: WAY_SOURCE,
-    },
-    {
-      stageIndex: 2,
-      clueId: 'ctrl-clue-3',
-      deviceName: '광통신 신호 수신기',
-      unlockedRevealText: '신호 수신기가 동기화되어 네 번째 마지막 단서가 열렸습니다.',
-      cluePrompt:
-        '수신기 단서 03: "안전·품질·윤리 기준을 타협 없이 준수하고 맡은 과업을 끝까지 책임진다." 일치하는 C.O.R.E. 패널을 복구하세요.',
-      correctPanelCode: 'R',
-      recordId: 'core-r',
-      wrongHint:
-        '힌트: 안전·품질 기준 준수(Rule)와 끝까지 완수하는 책임(Responsibility)을 떠올려 보세요.',
-      source_ref: WAY_SOURCE,
-    },
-    {
-      stageIndex: 3,
-      clueId: 'ctrl-clue-4',
-      deviceName: '출구 주 전원 차단기',
-      unlockedRevealText: '출구 주 전원이 복구되었습니다! 이제 관제실 출구 장치를 직접 작동하세요.',
-      cluePrompt:
-        '최종 단서 04: "최고의 기술 전문성을 바탕으로 변화에 주도적으로 도전하고 탁월한 성과를 완성한다." 일치하는 C.O.R.E. 패널을 복구하세요.',
-      correctPanelCode: 'E',
-      recordId: 'core-e',
-      wrongHint:
-        '힌트: 최고의 기술 전문성과 탁월한 실행력(Excellence)을 뜻하는 패널입니다.',
-      source_ref: WAY_SOURCE,
-    },
+  runnerPads: [
+    { letter: 'C', recordId: 'core-c', shortLabel: '고객 최우선' },
+    { letter: 'O', recordId: 'core-o', shortLabel: '열린 협력' },
+    { letter: 'R', recordId: 'core-r', shortLabel: '원칙과 책임' },
+    { letter: 'E', recordId: 'core-e', shortLabel: '실행·전문성' },
   ],
 }

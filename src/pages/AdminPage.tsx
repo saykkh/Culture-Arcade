@@ -319,7 +319,7 @@ export function AdminPage({ me, onNavigate }: AdminPageProps) {
                   </strong>
                 </div>
                 <div className="lobby-status-bar" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
-                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>접속자 대비 필수 5종 완료율</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>접속자 대비 4종 완료율</span>
                   <strong className="mono-num" style={{ fontSize: 20, color: 'var(--accent-clear)' }}>
                     {progressData.kpis.completionRatePct !== null
                       ? `${progressData.kpis.completionRatePct}%`
@@ -522,13 +522,11 @@ export function AdminPage({ me, onNavigate }: AdminPageProps) {
                       <th>시작일 / 권장일</th>
                       <th>학습 상태</th>
                       <th>기한 상태</th>
-                      <th>필수 진도</th>
+                      <th>케이블 진도</th>
                       <th>타자</th>
                       <th>뱀</th>
                       <th>슈팅</th>
-                      <th>레이싱</th>
-                      <th>핀볼</th>
-                      <th>보너스</th>
+                      <th>부스터런</th>
                       <th>시도수</th>
                       <th>최초완료</th>
                       <th>관리</th>
@@ -550,9 +548,9 @@ export function AdminPage({ me, onNavigate }: AdminPageProps) {
                         <td>{p.learningStatusLabel}</td>
                         <td>{p.dueStatusLabel}</td>
                         <td className="mono-num">
-                          <strong>{p.requiredClearedCount}/5</strong>
+                          <strong>{p.requiredClearedCount}/4</strong>
                         </td>
-                        {(['typing', 'snake', 'shooter', 'racing', 'pinball'] as const).map(
+                        {(['typing', 'snake', 'shooter', 'runner'] as const).map(
                           (gid) => {
                             const g = p.requiredGames[gid]
                             return (
@@ -562,7 +560,6 @@ export function AdminPage({ me, onNavigate }: AdminPageProps) {
                             )
                           },
                         )}
-                        <td>{p.bonusCleared ? '◉ 완료' : '-'}</td>
                         <td className="mono-num">{p.totalFinalizedAttempts}</td>
                         <td className="mono-num" style={{ fontSize: 12 }}>
                           {p.onboardingCompletedAt

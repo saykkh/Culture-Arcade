@@ -1,6 +1,14 @@
 import { getArcadePreferences } from './preferences'
 
-export type ArcadeSfxName = 'select' | 'start' | 'score' | 'clear' | 'wrong'
+export type ArcadeSfxName =
+  | 'select'
+  | 'start'
+  | 'score'
+  | 'clear'
+  | 'wrong'
+  | 'boost'
+  | 'slip'
+  | 'jump'
 
 export type ArcadeBgmTrack =
   | 'none'
@@ -9,9 +17,7 @@ export type ArcadeBgmTrack =
   | 'typing'
   | 'snake'
   | 'shooter'
-  | 'racing'
-  | 'pinball'
-  | 'control-room'
+  | 'runner'
 
 interface TrackPattern {
   bpm: number
@@ -81,38 +87,16 @@ const TRACK_PATTERNS: Record<Exclude<ArcadeBgmTrack, 'none'>, TrackPattern> = {
     bassNotes: [45, 45, 45, 57, 48, 48, 48, 60, 50, 50, 50, 62, 52, 52, 40, 52],
     hihatPattern: [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1],
   },
-  // High-speed 150 BPM turbo outrun synthwave drive for 3D Tunnel Racing
-  racing: {
-    bpm: 150,
-    leadWave: 'sawtooth',
-    bassWave: 'sawtooth',
-    leadGain: 0.024,
-    bassGain: 0.036,
-    leadNotes: [76, 0, 79, 83, 84, 0, 83, 79, 77, 0, 81, 84, 86, 84, 81, 79],
-    bassNotes: [40, 52, 40, 52, 40, 52, 40, 52, 41, 53, 41, 53, 43, 55, 43, 55],
-    hihatPattern: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  },
-  // Energetic arcade pinball electro-boogie for C.O.R.E. Pinball
-  pinball: {
-    bpm: 142,
+  // Energetic 146 BPM Mario-Kart / Sonic style turbo dash theme for C.O.R.E. Booster Run!
+  runner: {
+    bpm: 146,
     leadWave: 'square',
     bassWave: 'triangle',
-    leadGain: 0.026,
+    leadGain: 0.027,
     bassGain: 0.048,
-    leadNotes: [79, 83, 86, 0, 84, 79, 76, 0, 81, 84, 88, 0, 86, 83, 79, 74],
-    bassNotes: [43, 47, 50, 53, 48, 52, 55, 52, 41, 45, 48, 53, 43, 50, 47, 43],
-    hihatPattern: [1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1],
-  },
-  // Sci-fi cyber mystery pulse for Bonus 3D Control Room Escape
-  'control-room': {
-    bpm: 108,
-    leadWave: 'sine',
-    bassWave: 'triangle',
-    leadGain: 0.03,
-    bassGain: 0.042,
-    leadNotes: [74, 0, 81, 0, 77, 76, 74, 0, 72, 0, 79, 0, 76, 74, 69, 0],
-    bassNotes: [38, 0, 50, 0, 41, 0, 53, 0, 36, 0, 48, 0, 45, 0, 38, 0],
-    hihatPattern: [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0],
+    leadNotes: [76, 79, 84, 88, 86, 84, 79, 0, 77, 81, 86, 89, 88, 84, 79, 76],
+    bassNotes: [48, 60, 48, 60, 52, 64, 52, 64, 53, 65, 53, 65, 55, 67, 43, 55],
+    hihatPattern: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   },
 }
 
@@ -309,6 +293,20 @@ export function playArcadeSfx(name: ArcadeSfxName): void {
       break
     case 'wrong':
       playTone(ctx, 210, 0, 0.12, 'sawtooth', 0.05)
+      break
+    case 'boost':
+      playTone(ctx, 587.33, 0, 0.06, 'square', 0.075)
+      playTone(ctx, 880, 0.05, 0.07, 'square', 0.08)
+      playTone(ctx, 1174.66, 0.1, 0.12, 'triangle', 0.09)
+      break
+    case 'slip':
+      playTone(ctx, 420, 0, 0.06, 'sawtooth', 0.06)
+      playTone(ctx, 290, 0.055, 0.07, 'sawtooth', 0.06)
+      playTone(ctx, 185, 0.11, 0.11, 'sawtooth', 0.06)
+      break
+    case 'jump':
+      playTone(ctx, 360, 0, 0.05, 'triangle', 0.07)
+      playTone(ctx, 560, 0.04, 0.08, 'triangle', 0.075)
       break
   }
 }

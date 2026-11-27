@@ -2,15 +2,12 @@ export type LearningDomain = 'mission' | 'vision' | 'core_value' | 'philosophy'
 
 export type CoreValueCode = 'C' | 'O' | 'R' | 'E'
 
-export type RequiredGameId = 'typing' | 'snake' | 'shooter' | 'racing' | 'pinball'
-export type BonusGameId = 'control-room'
-export type GameId = RequiredGameId | BonusGameId
+export type RequiredGameId = 'typing' | 'snake' | 'shooter' | 'runner'
+export type GameId = RequiredGameId
 
 export type GameMode = 'standard' | 'assisted'
 
 export type AttemptKind = 'first_attempt' | 'retry_before_clear' | 'retry_after_clear'
-
-export type RenderPreference = '3d' | 'simplified' | 'panel-list'
 
 export type ParticipantLearningStatus =
   | 'before_start'
@@ -54,40 +51,19 @@ export interface ShooterActionSummary {
   missedShots: number
 }
 
-export interface RacingActionSummary {
-  kind: 'racing'
-  overtakeCount: number
-  collisionCount: number
-  gateChoice: 'left' | 'right' | 'center' | 'none'
-  gateCorrect: boolean
-  checkpointRecordIds: string[]
-  renderMode: '3d' | 'simplified'
-}
-
-export interface PinballActionSummary {
-  kind: 'pinball'
-  completedSets: number
-  validHits: number
-  uniqueLettersInCurrentSet: CoreValueCode[]
-  everCollectedLetters: CoreValueCode[]
-  ballsLost: number
-}
-
-export interface ControlRoomActionSummary {
-  kind: 'control-room'
-  restoredPanels: number
-  wrongSelections: number
-  exitActivated: boolean
-  interactionMode: '3d' | 'panel-list'
+export interface RunnerActionSummary {
+  kind: 'runner'
+  boostCount: number
+  bananaSlipCount: number
+  completedCoreSets: number
+  collectedLetters: CoreValueCode[]
 }
 
 export type GameActionSummary =
   | TypingActionSummary
   | SnakeActionSummary
   | ShooterActionSummary
-  | RacingActionSummary
-  | PinballActionSummary
-  | ControlRoomActionSummary
+  | RunnerActionSummary
 
 export type TypingRunEvent =
   | {
@@ -149,88 +125,34 @@ export type ShooterRunEvent =
       aimDurationMs: number
     }
 
-export type RacingRunEvent =
+export type RunnerRunEvent =
   | {
       seq: number
       t_ms: number
-      type: 'overtake'
-      vehicleId: string
-    }
-  | {
-      seq: number
-      t_ms: number
-      type: 'collision'
-      targetKind: 'vehicle' | 'obstacle'
-      entityId: string
-    }
-  | {
-      seq: number
-      t_ms: number
-      type: 'checkpoint'
-      checkpointIndex: 0 | 1 | 2
-      recordId: string
-    }
-  | {
-      seq: number
-      t_ms: number
-      type: 'gate_choice'
-      choice: 'left' | 'right' | 'center'
-    }
-
-export type PinballRunEvent =
-  | {
-      seq: number
-      t_ms: number
-      type: 'bumper_hit'
-      ballId: number
+      type: 'step_booster'
+      padId: string
       letter: CoreValueCode
-      separatedSinceLastHit: boolean
     }
   | {
       seq: number
       t_ms: number
-      type: 'ball_lost'
-      ballId: number
-    }
-
-export type ControlRoomRunEvent =
-  | {
-      seq: number
-      t_ms: number
-      type: 'inspect_clue'
-      stageIndex: number
-      clueId: string
-    }
-  | {
-      seq: number
-      t_ms: number
-      type: 'select_panel'
-      stageIndex: number
-      clueId: string
-      panelCode: CoreValueCode
-    }
-  | {
-      seq: number
-      t_ms: number
-      type: 'activate_exit'
+      type: 'hit_hazard'
+      hazardId: string
+      hazardKind: 'banana' | 'barrier'
     }
 
 export type GameRunEvent =
   | TypingRunEvent
   | SnakeRunEvent
   | ShooterRunEvent
-  | RacingRunEvent
-  | PinballRunEvent
-  | ControlRoomRunEvent
+  | RunnerRunEvent
 
 export type RunEndReason =
   | 'completed_all'
   | 'time_up'
   | 'miss_limit'
   | 'lives_exhausted'
-  | 'balls_exhausted'
   | 'course_finished'
-  | 'exit_activated'
 
 export interface LearningVersionRecord {
   id: string

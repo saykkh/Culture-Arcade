@@ -40,27 +40,10 @@ export interface ShooterQuestionItem {
   source_ref: string
 }
 
-export interface RacingContentConfig {
-  missionRecordId: string
-  visionRecordId: string
-  coreSummaryRecordId: string
-}
-
-export interface PinballBumperConfig {
+export interface RunnerPadConfig {
   letter: CoreValueCode
   recordId: string
-}
-
-export interface ControlRoomStageConfig {
-  stageIndex: 0 | 1 | 2 | 3
-  clueId: string
-  deviceName: string
-  unlockedRevealText: string
-  cluePrompt: string
-  correctPanelCode: CoreValueCode
-  recordId: string
-  wrongHint: string
-  source_ref: string
+  shortLabel: string
 }
 
 export interface LearningContentBundle {
@@ -73,12 +56,5 @@ export interface LearningContentBundle {
   typingItems: TypingContentItem[]
   snakeSentences: SnakeSentenceItem[]
   shooterQuestions: ShooterQuestionItem[]
-  racing: RacingContentConfig
-  pinballBumpers: PinballBumperConfig[]
-  controlRoomStages: [
-    ControlRoomStageConfig,
-    ControlRoomStageConfig,
-    ControlRoomStageConfig,
-    ControlRoomStageConfig,
-  ]
+  runnerPads: RunnerPadConfig[]
 }
