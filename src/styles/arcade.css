@@ -1196,6 +1196,22 @@ select:focus-visible,
     height: clamp(154px, 35dvh, 270px);
   }
 
+  .game-cabinet-shell[data-compact-typing] .arcade-sign-header,
+  .game-cabinet-shell[data-compact-typing] .game-practice-goal {
+    display: none;
+  }
+
+  .game-cabinet-shell[data-compact-typing] .game-practice-banner {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+
+  .game-cabinet-shell[data-compact-typing] .game-arena-typing {
+    height: clamp(128px, 31dvh, 154px);
+  }
+
   .typing-phrase {
     font-size: clamp(10px, 3.1vw, 14px) !important;
     padding: 4px 5px !important;

@@ -255,10 +255,24 @@ export function GameCabinetPage({
   const [deadlineWarning, setDeadlineWarning] = useState<string | null>(null)
   const [showAssistHelp, setShowAssistHelp] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [compactTyping, setCompactTyping] = useState(false)
 
   const monitorRef = useRef<HTMLDivElement | null>(null)
   const startRealBtnRef = useRef<HTMLButtonElement | null>(null)
   const launchInFlightRef = useRef(false)
+
+  useEffect(() => {
+    if (gameId !== 'typing') return
+    const viewport = window.visualViewport
+    const syncLayout = () => setCompactTyping(window.innerWidth <= 700 && (viewport?.height ?? window.innerHeight) <= 520)
+    syncLayout()
+    viewport?.addEventListener('resize', syncLayout)
+    window.addEventListener('resize', syncLayout)
+    return () => {
+      viewport?.removeEventListener('resize', syncLayout)
+      window.removeEventListener('resize', syncLayout)
+    }
+  }, [gameId])
 
   useEffect(() => {
     const onFsChange = () => {
@@ -425,7 +439,12 @@ export function GameCabinetPage({
   const showLiveStageBackdrop = stage === 'briefing' || stage === 'countdown' || stage === 'result'
 
   return (
-    <div className="arcade-shell has-backdrop game-cabinet-shell" data-stage={stage} style={{ position: 'relative', overflow: 'hidden' }}>
+    <div
+      className="arcade-shell has-backdrop game-cabinet-shell"
+      data-stage={stage}
+      data-compact-typing={compactTyping && (stage === 'playing' || stage === 'practice') ? 'true' : undefined}
+      style={{ position: 'relative', overflow: 'hidden' }}
+    >
       <ArcadeVideoBackdrop intensity="vivid" />
       {stage === 'result' && finalResult?.newlyLitSocket && <CableTransfer gameId={finalResult.gameId} />}
 
@@ -759,7 +778,7 @@ export function GameCabinetPage({
               ) : stage === 'practice' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
                   <div
-                    className="status-alert"
+                    className="status-alert game-practice-banner"
                     style={{
                       justifyContent: 'space-between',
                       background: '#162232',
@@ -767,7 +786,8 @@ export function GameCabinetPage({
                     }}
                   >
                     <div>
-                      <strong>[연습 모드 · 기록 미반영]</strong> 목표: {meta.practiceGoalLabel}
+                      <strong>연습 · 기록 미반영</strong>
+                      <span className="game-practice-goal"> · 목표 {meta.practiceGoalLabel}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       {practiceStatus === 'time_up' && (
