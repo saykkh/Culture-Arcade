@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildSnakeSentenceSequence, getContentBundle } from '../../../content'
+import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
 import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, LearningDomain, RunEndReason, SnakeRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -85,6 +86,9 @@ export function SnakeGame({
   const [candidates, setCandidates] = useState<CandidateChunkOnGrid[]>(initialCandidates)
   const [practiceCleared, setPracticeCleared] = useState(false)
   const [eatBurst, setEatBurst] = useState<{ x: number; y: number; label: string } | null>(null)
+  const [waveShock, setWaveShock] = useState<{ x: number; y: number; startedMs: number } | null>(
+    null,
+  )
 
   const [wrongOverlay, setWrongOverlay] = useState<{
     chosenText: string
@@ -346,6 +350,9 @@ export function SnakeGame({
           const nextStep = curStep + 1
           if (nextStep >= curSentence.chunks.length) {
             playArcadeSfx('clear')
+            if (!prefs.reduceMotion) {
+              setWaveShock({ x: nextHead.x, y: nextHead.y, startedMs: nowMs })
+            }
             completedSentencesRef.current += 1
             setCompletedSentences(completedSentencesRef.current)
 
@@ -483,8 +490,9 @@ export function SnakeGame({
       ctx.fillRect(0, 0, width, height)
     }
 
-    // Crisp subtle grid lines & intersection dots
-    ctx.strokeStyle = 'rgba(67, 231, 242, 0.065)'
+    // Crisp circuit-board grid lines & animated electric current packets!
+    const tSec = elapsedMs / 1000
+    ctx.strokeStyle = 'rgba(67, 231, 242, 0.08)'
     ctx.lineWidth = 1
     for (let x = 1; x < SNAKE_GRID_COLS; x += 1) {
       ctx.beginPath()
@@ -499,21 +507,70 @@ export function SnakeGame({
       ctx.stroke()
     }
 
+    if (!prefs.reduceMotion) {
+      for (let p = 0; p < 12; p += 1) {
+        const isHoriz = p % 2 === 0
+        ctx.fillStyle = p % 3 === 0 ? 'rgba(185, 246, 108, 0.45)' : 'rgba(67, 231, 242, 0.4)'
+        if (isHoriz) {
+          const row = ((p * 2 + 1) % (SNAKE_GRID_ROWS - 1)) + 1
+          const px = (tSec * (110 + p * 18) + p * 95) % width
+          ctx.fillRect(px, row * cellH - 1.5, 22, 3)
+        } else {
+          const col = ((p * 3 + 2) % (SNAKE_GRID_COLS - 1)) + 1
+          const py = (tSec * (90 + p * 15) + p * 70) % height
+          ctx.fillRect(col * cellW - 1.5, py, 3, 20)
+        }
+      }
+    }
+
+    // Sentence Completion Full-Arena Energy Shockwave!
+    if (waveShock && !prefs.reduceMotion) {
+      const ageSec = (elapsedMs - waveShock.startedMs) / 1000
+      if (ageSec >= 0 && ageSec < 0.9) {
+        ctx.save()
+        ctx.strokeStyle = `rgba(185, 246, 108, ${Math.max(0, 0.75 - ageSec * 0.8)})`
+        ctx.lineWidth = 5
+        ctx.beginPath()
+        ctx.arc(
+          (waveShock.x + 0.5) * cellW,
+          (waveShock.y + 0.5) * cellH,
+          24 + ageSec * 560,
+          0,
+          Math.PI * 2,
+        )
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
     // Glowing arena boundary frame
-    ctx.strokeStyle = 'rgba(67, 231, 242, 0.48)'
+    ctx.strokeStyle = 'rgba(67, 231, 242, 0.52)'
     ctx.lineWidth = 3
     ctx.strokeRect(1.5, 1.5, width - 3, height - 3)
+
+    // Tail plasma particles behind Mecha-Dragon
+    const tailTip = snakeBody[snakeBody.length - 1]!
+    if (!prefs.reduceMotion) {
+      for (let k = 0; k < 4; k += 1) {
+        const tx = (tailTip.x + 0.5) * cellW + Math.sin(tSec * 8 + k) * 9
+        const ty = (tailTip.y + 0.5) * cellH + Math.cos(tSec * 7 + k) * 9
+        ctx.fillStyle = 'rgba(185, 246, 108, 0.45)'
+        ctx.beginPath()
+        ctx.arc(tx, ty, 3.5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
 
     // Smooth continuous neon spine connecting snake segments
     if (snakeBody.length > 1) {
       ctx.save()
       ctx.strokeStyle = '#7be851'
-      ctx.lineWidth = Math.min(cellW, cellH) * 0.64
+      ctx.lineWidth = Math.min(cellW, cellH) * 0.66
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       if (!prefs.reduceMotion) {
         ctx.shadowColor = '#B9F66C'
-        ctx.shadowBlur = 12
+        ctx.shadowBlur = 14
       }
       ctx.beginPath()
       snakeBody.forEach((seg, idx) => {
@@ -526,38 +583,67 @@ export function SnakeGame({
       ctx.restore()
     }
 
-    // Inner core scales along body + Cyber Visor Head
+    // Inner core scales along body
     for (let i = snakeBody.length - 1; i >= 1; i -= 1) {
       const seg = snakeBody[i]!
       const cx = (seg.x + 0.5) * cellW
       const cy = (seg.y + 0.5) * cellH
-      const r = Math.max(6, Math.min(cellW, cellH) * (0.26 - i * 0.008))
+      const r = Math.max(6, Math.min(cellW, cellH) * (0.28 - i * 0.008))
       ctx.fillStyle = i % 2 === 0 ? '#d2ff96' : '#43E7F2'
       ctx.beginPath()
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.fill()
     }
 
-    // Snake Head with directional eyes
+    // Articulated Mecha-Cable Dragon Head (Horns + Visor Eyes + Chomping Mouth near Orb!)
+    const nearAnyOrb = candidates.some(
+      (c) => Math.hypot(c.x - head.x, c.y - head.y) <= 2.4,
+    )
+    const dirVec = DIRECTION_DELTAS[directionState]
+
     ctx.save()
+    ctx.translate(headCx, headCy)
+    // Cyber Twin Horns
+    ctx.strokeStyle = '#B9F66C'
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.moveTo(-10, -12)
+    ctx.lineTo(-18, -22)
+    ctx.moveTo(10, -12)
+    ctx.lineTo(18, -22)
+    ctx.stroke()
+
     ctx.fillStyle = '#43E7F2'
     if (!prefs.reduceMotion) {
       ctx.shadowColor = '#43E7F2'
-      ctx.shadowBlur = 14
+      ctx.shadowBlur = 16
     }
     ctx.beginPath()
-    ctx.roundRect(headCx - 21, headCy - 16, 42, 32, 11)
+    ctx.roundRect(-22, -17, 44, 34, 12)
+    ctx.fill()
+
+    // Chomping glowing mouth when approaching a word capsule!
+    if (nearAnyOrb) {
+      ctx.fillStyle = '#061019'
+      ctx.beginPath()
+      ctx.arc(dirVec.x * 14, dirVec.y * 11, 7, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // Directional Dragon Eyes
+    ctx.fillStyle = '#061019'
+    ctx.beginPath()
+    ctx.arc(dirVec.x * 7 - dirVec.y * 7, dirVec.y * 6 - dirVec.x * 7, 4, 0, Math.PI * 2)
+    ctx.arc(dirVec.x * 7 + dirVec.y * 7, dirVec.y * 6 + dirVec.x * 7, 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#FFFFFF'
+    ctx.beginPath()
+    ctx.arc(dirVec.x * 8 - dirVec.y * 7, dirVec.y * 7 - dirVec.x * 7, 1.5, 0, Math.PI * 2)
+    ctx.arc(dirVec.x * 8 + dirVec.y * 7, dirVec.y * 7 + dirVec.x * 7, 1.5, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
 
-    const eyeOffset = DIRECTION_DELTAS[directionState]
-    ctx.fillStyle = '#061019'
-    ctx.beginPath()
-    ctx.arc(headCx + eyeOffset.x * 7 - eyeOffset.y * 6, headCy + eyeOffset.y * 6 - eyeOffset.x * 6, 3.5, 0, Math.PI * 2)
-    ctx.arc(headCx + eyeOffset.x * 7 + eyeOffset.y * 6, headCy + eyeOffset.y * 6 + eyeOffset.x * 6, 3.5, 0, Math.PI * 2)
-    ctx.fill()
-
-    // Integrated Neon Word Capsules right at each candidate cell!
+    // Bobbing & Rotating Holographic Word Orbs!
     ctx.font = '800 15px "Paperlogy", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -566,33 +652,42 @@ export function SnakeGame({
 
     for (const cand of candidates) {
       const cx = (cand.x + 0.5) * cellW
+      const bobOffset = prefs.reduceMotion ? 0 : Math.sin(tSec * 4.5 + cand.badgeIndex * 1.4) * 3.5
       const cy = (cand.y + 0.5) * cellH
       const accent = badgeColors[(cand.badgeIndex - 1) % badgeColors.length]!
 
-      // Glowing target ring on the exact grid cell to eat
+      // Glowing target orb + rotating dashed ring
       ctx.save()
-      ctx.fillStyle = 'rgba(67, 231, 242, 0.2)'
+      ctx.fillStyle = 'rgba(67, 231, 242, 0.24)'
       ctx.strokeStyle = accent
       ctx.lineWidth = 2.5
       if (!prefs.reduceMotion) {
         ctx.shadowColor = accent
-        ctx.shadowBlur = 12
+        ctx.shadowBlur = 14
       }
       ctx.beginPath()
-      ctx.arc(cx, cy, 16, 0, Math.PI * 2)
+      ctx.arc(cx, cy, 15, 0, Math.PI * 2)
       ctx.fill()
+      ctx.stroke()
+
+      ctx.translate(cx, cy)
+      ctx.rotate(tSec * 2.2 + cand.badgeIndex)
+      ctx.setLineDash([6, 5])
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      ctx.arc(0, 0, 20, 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
 
-      // Crisp pill label anchored cleanly just above (or below if top row) the glowing orb
+      // Bobbing Neon Pill Label
       const label = `${cand.badgeIndex}. ${cand.text}`
       const textWidth = ctx.measureText(label).width
       const pillW = textWidth + 22
       const pillH = 26
       const clampedX = Math.min(width - pillW / 2 - 8, Math.max(pillW / 2 + 8, cx))
-      const pillY = cand.y <= 1 ? cy + 28 : cy - 28
+      const pillY = (cand.y <= 1 ? cy + 29 : cy - 29) + bobOffset
 
-      ctx.fillStyle = 'rgba(13, 23, 38, 0.94)'
+      ctx.fillStyle = 'rgba(13, 23, 38, 0.95)'
       ctx.strokeStyle = accent
       ctx.lineWidth = 1.8
       ctx.beginPath()
@@ -618,7 +713,7 @@ export function SnakeGame({
       ctx.fillText(eatBurst.label, bx, by - 26)
       ctx.restore()
     }
-  }, [snakeBody, candidates, directionState, eatBurst, prefs.reduceMotion])
+  }, [snakeBody, candidates, directionState, eatBurst, elapsedMs, prefs.reduceMotion, waveShock])
 
   const currentSentence = sentences[sentenceCursor % sentences.length]!
   const collectedChunks = currentSentence.chunks.slice(0, stepIdx)
@@ -632,6 +727,18 @@ export function SnakeGame({
       {/* Compact Wide HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0, padding: '6px 12px' }}>
         <div className="hud-metric">
+          <CoreBotMascot
+            mood={
+              cleared
+                ? 'crown'
+                : lives === 1 || wrongOverlay
+                  ? 'danger'
+                  : completedSentences >= 1
+                    ? 'fever'
+                    : 'cheer'
+            }
+            size={36}
+          />
           <span className="cabinet-badge-type">
             {DOMAIN_BADGE_LABELS[currentSentence.domain]}
           </span>
@@ -676,6 +783,8 @@ export function SnakeGame({
           )}
         </div>
       </div>
+
+      {!isPractice && <PassMilestoneBanner cleared={cleared} score={score} />}
 
       {/* Inline Sentence Assembly + Live Toast Strip */}
       <div

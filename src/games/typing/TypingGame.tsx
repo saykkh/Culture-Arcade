@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildTypingSchedule, getContentBundle } from '../../../content'
+import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
 import { BASE_ACTION_POINTS, normalizePhraseInput, PASSING_SCORE } from '../../domain/rules'
 import type { GameMode, RunEndReason, TypingRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -80,6 +81,10 @@ export function TypingGame({
   } | null>(null)
 
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const bgCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const shatterSparksRef = useRef<
+    Array<{ x: number; y: number; vx: number; vy: number; color: string; age: number }>
+  >([])
   const isComposingRef = useRef(false)
   const finishedRef = useRef(false)
   const elapsedRef = useRef(0)
@@ -186,6 +191,131 @@ export function TypingGame({
     return () => window.cancelAnimationFrame(rafId)
   }, [paused, practiceCleared, schedule, isPractice, maxDurationMs, finishOnce])
 
+  // Render Dynamic Cyber-City Skyline + Digital Rain + Superconducting Bot Turret + Word Shatter Sparks!
+  useEffect(() => {
+    const canvas = bgCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const w = canvas.width
+    const h = canvas.height
+    const tSec = elapsedMs / 1000
+
+    // Sky gradient (shifts into vibrant cyan-magenta aurora during 3+ COMBO FEVER!)
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, h)
+    bgGrad.addColorStop(0, combo >= 3 ? '#0d1430' : '#060b16')
+    bgGrad.addColorStop(0.75, combo >= 3 ? '#132844' : '#0d182b')
+    bgGrad.addColorStop(1, '#122238')
+    ctx.fillStyle = bgGrad
+    ctx.fillRect(0, 0, w, h)
+
+    // Cyber-City Skyline + Power Transmission Towers
+    for (let i = 0; i < 20; i += 1) {
+      const bx = i * 54 + 6
+      const bh = 48 + ((i * 37) % 86)
+      ctx.fillStyle = 'rgba(18, 34, 56, 0.78)'
+      ctx.fillRect(bx, h - 38 - bh, 42, bh)
+      ctx.strokeStyle = i % 3 === 0 ? 'rgba(67,231,242,0.22)' : 'rgba(185,246,108,0.15)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(bx, h - 38 - bh, 42, bh)
+
+      // Twinkling building windows
+      for (let wy = h - 30 - bh; wy < h - 48; wy += 16) {
+        const twinkle = Math.sin(tSec * 2.5 + i + wy) > -0.2
+        if (twinkle) {
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(67,231,242,0.3)' : 'rgba(255,189,100,0.24)'
+          ctx.fillRect(bx + 8, wy, 9, 6)
+          ctx.fillRect(bx + 24, wy, 9, 6)
+        }
+      }
+    }
+
+    // Falling Digital Matrix / Optical Fiber Rain Streaks
+    if (!prefs.reduceMotion) {
+      for (let r = 0; r < 34; r += 1) {
+        const rx = (r * 67 + 19) % w
+        const speed = 110 + (r % 5) * 42
+        const ry = (tSec * speed + r * 47) % (h - 36)
+        ctx.strokeStyle = r % 3 === 0 ? 'rgba(185, 246, 108, 0.28)' : 'rgba(67, 231, 242, 0.24)'
+        ctx.lineWidth = 1.6
+        ctx.beginPath()
+        ctx.moveTo(rx, ry)
+        ctx.lineTo(rx, ry + 18)
+        ctx.stroke()
+      }
+    }
+
+    // Bottom Power-Grid Deck & Spinning Superconducting Turbine + Cyber-Engineer Bot
+    ctx.fillStyle = '#091322'
+    ctx.fillRect(0, h - 40, w, 40)
+
+    const cx = w * 0.5
+    const cy = h - 22
+    const spinAngle = tSec * (2.2 + combo * 1.1)
+
+    ctx.save()
+    ctx.translate(cx, cy)
+    // Fever aura ring
+    if (combo >= 3) {
+      ctx.strokeStyle = 'rgba(185, 246, 108, 0.65)'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(0, 0, 38 + Math.sin(tSec * 8) * 4, Math.PI, 0)
+      ctx.stroke()
+    }
+    // Spinning turbine blades
+    ctx.rotate(spinAngle)
+    ctx.strokeStyle = combo >= 3 ? '#B9F66C' : '#43E7F2'
+    ctx.lineWidth = 2.5
+    for (let b = 0; b < 4; b += 1) {
+      ctx.rotate(Math.PI / 2)
+      ctx.beginPath()
+      ctx.moveTo(0, 0)
+      ctx.lineTo(22, 0)
+      ctx.stroke()
+    }
+    ctx.restore()
+
+    // Cyber-Engineer Bot Head & Typing Hands at Console
+    const bob = prefs.reduceMotion ? 0 : Math.sin(tSec * 7) * 2.5
+    ctx.fillStyle = '#152842'
+    ctx.strokeStyle = combo >= 3 ? '#B9F66C' : '#43E7F2'
+    ctx.lineWidth = 2.5
+    ctx.beginPath()
+    ctx.roundRect(cx - 20, cy - 30 + bob, 40, 26, 9)
+    ctx.fill()
+    ctx.stroke()
+
+    // Bot Visor Eyes
+    ctx.fillStyle = combo >= 3 ? '#B9F66C' : '#43E7F2'
+    ctx.beginPath()
+    ctx.arc(cx - 7, cy - 17 + bob, 3.5, 0, Math.PI * 2)
+    ctx.arc(cx + 7, cy - 17 + bob, 3.5, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Shatter Explosion Sparks when words are cleared!
+    shatterSparksRef.current = shatterSparksRef.current
+      .map((sp) => ({
+        ...sp,
+        x: sp.x + sp.vx * 0.016,
+        y: sp.y + sp.vy * 0.016,
+        vy: sp.vy + 180 * 0.016,
+        age: sp.age + 16,
+      }))
+      .filter((sp) => sp.age < 520)
+
+    for (const sp of shatterSparksRef.current) {
+      ctx.save()
+      ctx.globalAlpha = Math.max(0, 1 - sp.age / 520)
+      ctx.fillStyle = sp.color
+      ctx.beginPath()
+      ctx.arc(sp.x, sp.y, 4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+  }, [combo, elapsedMs, prefs.reduceMotion])
+
   const visibleSlots = schedule.filter(
     (s) =>
       elapsedMs >= s.spawnMs &&
@@ -231,6 +361,20 @@ export function TypingGame({
           text: `+${BASE_ACTION_POINTS}점!`,
         })
         window.setTimeout(() => setLaserShot(null), 360)
+
+        const px = (hitLeftPct / 100) * 1040
+        const py = (hitTopPct / 100) * 380
+        for (let k = 0; k < 18; k += 1) {
+          const ang = (Math.PI * 2 * k) / 18
+          shatterSparksRef.current.push({
+            x: px,
+            y: py,
+            vx: Math.cos(ang) * (90 + (k % 4) * 35),
+            vy: Math.sin(ang) * 85 - 50,
+            color: k % 2 === 0 ? '#B9F66C' : '#43E7F2',
+            age: 0,
+          })
+        }
       }
 
       clearedSetRef.current.add(target.slotId)
@@ -325,8 +469,20 @@ export function TypingGame({
       }}
     >
       {/* HUD */}
-      <div className="play-hud-bar">
+      <div className="play-hud-bar" style={{ marginBottom: 0 }}>
         <div className="hud-metric">
+          <CoreBotMascot
+            mood={
+              cleared
+                ? 'crown'
+                : combo >= 3
+                  ? 'fever'
+                  : missedSlotIds.length >= 3
+                    ? 'danger'
+                    : 'cheer'
+            }
+            size={38}
+          />
           <span style={{ color: 'var(--text-muted)' }}>통과 목표 ({PASSING_SCORE}점)</span>
           <strong style={{ color: cleared ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
             {isPractice
@@ -399,18 +555,54 @@ export function TypingGame({
         </div>
       )}
 
-      {/* Falling Phrase Stage (4 non-overlapping columns!) */}
+      {!isPractice && <PassMilestoneBanner cleared={cleared} score={score} />}
+
+      {/* Falling Phrase Stage with Live Cyber-City & Bot Turret Canvas Backdrop */}
       <div
         style={{
           position: 'relative',
           flex: 1,
           minHeight: 340,
-          background: 'linear-gradient(180deg, #090e17 0%, #0e1624 88%, #1a1824 100%)',
-          border: '1px solid rgba(67, 231, 242, 0.24)',
+          background: '#080e1a',
+          border: `1.5px solid ${combo >= 3 ? 'var(--accent-clear)' : 'rgba(67, 231, 242, 0.28)'}`,
           borderRadius: 10,
           overflow: 'hidden',
         }}
       >
+        <canvas
+          ref={bgCanvasRef}
+          width={1040}
+          height={380}
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            pointerEvents: 'none',
+          }}
+        />
+
+        {combo >= 3 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 12,
+              padding: '3px 11px',
+              borderRadius: 999,
+              background: 'rgba(185, 246, 108, 0.2)',
+              border: '1px solid var(--accent-clear)',
+              color: 'var(--accent-clear)',
+              fontSize: 12,
+              fontWeight: 900,
+              zIndex: 3,
+            }}
+          >
+            🔥 {combo} COMBO FEVER!
+          </div>
+        )}
         {visibleSlots.map((slot) => {
           const progress = Math.min(1, Math.max(0, (elapsedMs - slot.spawnMs) / slot.fallDurationMs))
           const topPct = 6 + progress * 75

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
 import { PASSING_SCORE } from '../../domain/rules'
 import type { CoreValueCode, GameMode, RunEndReason, RunnerRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -315,8 +316,20 @@ export function RunnerGame({
     ctx.fillRect(w / 2 - 160, 0, 320, horizonY + 12)
     ctx.restore()
 
+    // Horizon Cityscape Silhouette
+    for (let b = 0; b < 14; b += 1) {
+      const bx = b * 78 + 8
+      if (bx > w * 0.36 && bx < w * 0.6) continue
+      const bh = 22 + ((b * 23) % 44)
+      ctx.fillStyle = '#111b32'
+      ctx.strokeStyle = b % 2 === 0 ? 'rgba(67,231,242,0.34)' : 'rgba(255,107,158,0.34)'
+      ctx.lineWidth = 1
+      ctx.fillRect(bx, horizonY - bh, 52, bh)
+      ctx.strokeRect(bx, horizonY - bh, 52, bh)
+    }
+
     // Floor Deck
-    ctx.fillStyle = '#090e19'
+    ctx.fillStyle = snap.hyperRemainMs > 0 ? '#140c29' : '#090e19'
     ctx.fillRect(0, horizonY, w, h - horizonY)
 
     const topTrackHalfW = w * 0.11
@@ -334,6 +347,26 @@ export function RunnerGame({
       const scale = halfW / bottomTrackHalfW
       const x = w / 2 + laneOffsetFromCenter * (halfW * 0.66)
       return { x, y, scale, halfW }
+    }
+
+    // Scrolling 3D Roadside Neon Buildings & Overhead LS WAY Gantry Arches!
+    const archSpacing = 190
+    const firstArchZ = Math.ceil(snap.distance / archSpacing) * archSpacing - snap.distance
+    for (let rz = visibleRangeZ; rz >= 8; rz -= 48) {
+      const scrolledZ = ((rz - (snap.distance % 48)) + visibleRangeZ) % visibleRangeZ
+      if (scrolledZ < 14) continue
+      const p = projectPoint(0, scrolledZ)
+      const s = p.scale
+      const bWidth = 54 * s
+      const bHeight = 96 * s
+      for (const side of [-1, 1]) {
+        const bx = side < 0 ? w / 2 - p.halfW - bWidth - 18 * s : w / 2 + p.halfW + 18 * s
+        ctx.fillStyle = 'rgba(16, 28, 48, 0.85)'
+        ctx.strokeStyle = side < 0 ? 'rgba(67,231,242,0.35)' : 'rgba(185,246,108,0.32)'
+        ctx.lineWidth = Math.max(1, 1.8 * s)
+        ctx.fillRect(bx, p.y - bHeight, bWidth, bHeight)
+        ctx.strokeRect(bx, p.y - bHeight, bWidth, bHeight)
+      }
     }
 
     // Road Polygon
@@ -400,6 +433,34 @@ export function RunnerGame({
       ctx.moveTo(w / 2 - p.halfW, p.y)
       ctx.lineTo(w / 2 + p.halfW, p.y)
       ctx.stroke()
+    }
+
+    // Overhead High-Voltage Neon Highway Gantry Arches rushing past!
+    for (let az = firstArchZ; az < visibleRangeZ; az += archSpacing) {
+      if (az < 16) continue
+      const ap = projectPoint(0, az)
+      const archH = 108 * ap.scale
+      ctx.save()
+      ctx.strokeStyle =
+        snap.hyperRemainMs > 0 ? 'rgba(255, 107, 158, 0.55)' : 'rgba(67, 231, 242, 0.34)'
+      ctx.lineWidth = Math.max(1.5, 4 * ap.scale)
+      ctx.beginPath()
+      ctx.moveTo(w / 2 - ap.halfW * 1.08, ap.y)
+      ctx.lineTo(w / 2 - ap.halfW * 0.92, ap.y - archH)
+      ctx.lineTo(w / 2 + ap.halfW * 0.92, ap.y - archH)
+      ctx.lineTo(w / 2 + ap.halfW * 1.08, ap.y)
+      ctx.stroke()
+
+      if (ap.scale > 0.38) {
+        ctx.fillStyle = 'rgba(12, 24, 42, 0.9)'
+        ctx.fillRect(w / 2 - 48 * ap.scale, ap.y - archH - 9 * ap.scale, 96 * ap.scale, 18 * ap.scale)
+        ctx.fillStyle = '#43E7F2'
+        ctx.font = `800 ${Math.max(9, Math.round(12 * ap.scale))}px "Paperlogy", sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('LS WAY · C·O·R·E', w / 2, ap.y - archH)
+      }
+      ctx.restore()
     }
 
     // Speed lines during Boost / Hyper Boost
@@ -678,8 +739,14 @@ export function RunnerGame({
 
     ctx.save()
     ctx.translate(runnerX, runnerBodyY)
-    if ((snap.slipRemainMs > 0 || snap.stunRemainMs > 0) && !prefs.reduceMotion) {
+    // Dynamic lane-switch lean + Somersault Spin on Super Jump!
+    const laneBank = (snap.lane - snap.visualLane) * 0.28
+    if (snap.isSuperJump && snap.jumpHeight > 0.35 && !prefs.reduceMotion) {
+      ctx.rotate(laneBank + (snap.elapsedMs % 450) * ((Math.PI * 2) / 450))
+    } else if ((snap.slipRemainMs > 0 || snap.stunRemainMs > 0) && !prefs.reduceMotion) {
       ctx.rotate(Math.sin(snap.elapsedMs * 0.045) * 0.36)
+    } else {
+      ctx.rotate(laneBank)
     }
 
     // Active Shield Bubble Aura around Runner!
@@ -688,10 +755,35 @@ export function RunnerGame({
       ctx.fillStyle = 'rgba(67, 231, 242, 0.16)'
       ctx.lineWidth = 3
       ctx.beginPath()
-      ctx.arc(0, -18, 38, 0, Math.PI * 2)
+      ctx.arc(0, -18, 40, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
     }
+
+    // Glowing Plasma Hoverboard under Runner's Feet!
+    ctx.fillStyle = snap.hyperRemainMs > 0 ? '#FF6B9E' : '#183454'
+    ctx.strokeStyle = snap.boostRemainMs > 0 ? '#B9F66C' : '#43E7F2'
+    ctx.lineWidth = 2.5
+    ctx.beginPath()
+    ctx.ellipse(0, 14, 28, 7, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    // Flowing Dynamic Neon Energy Cape!
+    const capeWave = prefs.reduceMotion ? 0 : Math.sin(snap.elapsedMs * 0.022) * 7
+    ctx.fillStyle =
+      snap.hyperRemainMs > 0
+        ? 'rgba(255, 107, 158, 0.88)'
+        : snap.boostRemainMs > 0
+          ? 'rgba(185, 246, 108, 0.85)'
+          : 'rgba(67, 231, 242, 0.72)'
+    ctx.beginPath()
+    ctx.moveTo(-14, -24)
+    ctx.lineTo(14, -24)
+    ctx.lineTo(22 + capeWave, 8)
+    ctx.lineTo(-22 + capeWave, 8)
+    ctx.closePath()
+    ctx.fill()
 
     // Booster / Hyper Flame Trail
     if (snap.boostRemainMs > 0 || snap.hyperRemainMs > 0) {
@@ -826,6 +918,18 @@ export function RunnerGame({
       {/* Top HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0 }}>
         <div className="hud-metric" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <CoreBotMascot
+            mood={
+              snap.cleared
+                ? 'crown'
+                : snap.stunRemainMs > 0
+                  ? 'danger'
+                  : snap.hyperRemainMs > 0 || snap.boostRemainMs > 0
+                    ? 'fever'
+                    : 'cheer'
+            }
+            size={36}
+          />
           <span style={{ color: 'var(--text-muted)' }}>통과 ({PASSING_SCORE}점)</span>
           <strong
             style={{
@@ -942,6 +1046,8 @@ export function RunnerGame({
           )}
         </div>
       </div>
+
+      {!isPractice && <PassMilestoneBanner cleared={snap.cleared} score={snap.score} />}
 
       {/* Compact 8-Device Quick Legend Strip */}
       <div

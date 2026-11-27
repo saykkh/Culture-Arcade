@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArcadeHeader } from '../components/ArcadeHeader'
 import { ArcadeVideoBackdrop } from '../components/ArcadeVideoBackdrop'
 import { CabinetArtwork } from '../components/CabinetArtwork'
+import { CoreBotMascot } from '../components/CoreBotMascot'
 import { ALL_GAME_IDS, GAME_CATALOG, REQUIRED_GAME_ORDER } from '../domain/rules'
 import type { GameId } from '../domain/types'
 import {
@@ -191,8 +192,8 @@ export function ArcadeLobbyPage({
   }
 
   return (
-    <div className="arcade-shell" style={{ position: 'relative', overflow: 'hidden' }}>
-      <ArcadeVideoBackdrop intensity="ambient" />
+    <div className="arcade-shell has-backdrop" style={{ position: 'relative', overflow: 'hidden' }}>
+      <ArcadeVideoBackdrop intensity="vivid" />
 
       <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
         <ArcadeHeader
@@ -242,6 +243,16 @@ export function ArcadeLobbyPage({
           aria-label="개인 진도 및 다음 행동 안내"
         >
           <div className="lobby-recommendation">
+            <CoreBotMascot
+              mood={
+                me.badgeEarned
+                  ? 'crown'
+                  : me.requiredClearedCount >= 2
+                    ? 'fever'
+                    : 'cheer'
+              }
+              size={48}
+            />
             <div>
               <span className="lobby-rec-headline">{me.recommendation.headline}</span>
               <span className="lobby-rec-subline" style={{ marginLeft: 10 }}>
@@ -402,14 +413,15 @@ export function ArcadeLobbyPage({
                   </div>
                 </div>
 
-                {/* Tall Neon CRT Monitor Artwork */}
+                {/* Full-Bleed Live 60fps Demo Monitor Artwork (Zero black side margins!) */}
                 <div
-                  className="cabinet-scene-preview"
+                  className="cabinet-scene-preview crt-scanline-frame"
                   style={{
-                    height: 112,
-                    margin: '9px 0',
-                    borderColor: `${meta.accentColor}44`,
-                    boxShadow: 'inset 0 0 18px rgba(0, 0, 0, 0.65)',
+                    flex: 1,
+                    minHeight: 138,
+                    margin: '8px 0',
+                    borderColor: `${meta.accentColor}66`,
+                    boxShadow: `inset 0 0 22px rgba(0, 0, 0, 0.55), 0 0 14px ${meta.accentColor}1f`,
                   }}
                 >
                   <CabinetArtwork gameId={gid} />

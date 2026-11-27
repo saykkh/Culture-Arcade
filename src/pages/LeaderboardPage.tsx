@@ -52,8 +52,8 @@ export function LeaderboardPage({
   const podiumTop3 = board ? board.top10.slice(0, 3) : []
 
   return (
-    <div className="arcade-shell" style={{ position: 'relative', overflow: 'hidden' }}>
-      <ArcadeVideoBackdrop intensity="ambient" />
+    <div className="arcade-shell has-backdrop" style={{ position: 'relative', overflow: 'hidden' }}>
+      <ArcadeVideoBackdrop intensity="vivid" />
 
       <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
         <ArcadeHeader me={me} onNavigate={onNavigate} onLogout={() => void onLogout()} />

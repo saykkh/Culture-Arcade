@@ -11,6 +11,8 @@ export type ArcadeSfxName =
   | 'jump'
   | 'stun'
   | 'shield'
+  | 'countdown'
+  | 'go'
 
 export type ArcadeBgmTrack =
   | 'none'
@@ -317,6 +319,13 @@ export function playArcadeSfx(name: ArcadeSfxName): void {
     case 'shield':
       playTone(ctx, 660, 0, 0.06, 'sine', 0.08)
       playTone(ctx, 990, 0.05, 0.1, 'triangle', 0.085)
+      break
+    case 'countdown':
+      playTone(ctx, 523.25, 0, 0.09, 'square', 0.065)
+      break
+    case 'go':
+      playTone(ctx, 783.99, 0, 0.07, 'square', 0.08)
+      playTone(ctx, 1046.5, 0.06, 0.16, 'triangle', 0.095)
       break
   }
 }

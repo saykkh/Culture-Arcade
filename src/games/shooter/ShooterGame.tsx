@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildShooterRound, getContentBundle } from '../../../content'
+import { CoreBotMascot, PassMilestoneBanner } from '../../components/CoreBotMascot'
 import { BASE_ACTION_POINTS, PASSING_SCORE } from '../../domain/rules'
 import type { CoreValueCode, GameMode, RunEndReason, ShooterRunEvent } from '../../domain/types'
 import { useArcadePreferences } from '../../lib/preferences'
@@ -435,7 +436,7 @@ export function ShooterGame({
     tabPaused,
   ])
 
-  // Unified Shooter Arena Canvas (3 Giant Readable Target Shields + Lock-On + Laser Turret)
+  // Unified Shooter Arena Canvas (Warp Starfield + Hovering Drone Shields + Twin-Wing Starfighter + Wingmen!)
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -444,58 +445,96 @@ export function ShooterGame({
 
     const w = canvas.width
     const h = canvas.height
+    const tSec = (aimElapsedMs + practiceElapsedMs + questionIdx * 2300) / 1000
+    const isClearedBonusMode = !isPractice && correctCount * BASE_ACTION_POINTS >= PASSING_SCORE
 
+    // Deep Galactic Nebula Backdrop
     const bgGrad = ctx.createLinearGradient(0, 0, 0, h)
-    bgGrad.addColorStop(0, '#070d18')
-    bgGrad.addColorStop(1, '#0b1424')
+    bgGrad.addColorStop(0, '#040814')
+    bgGrad.addColorStop(0.55, isClearedBonusMode ? '#111b3b' : '#0a1326')
+    bgGrad.addColorStop(1, '#10203a')
     ctx.fillStyle = bgGrad
     ctx.fillRect(0, 0, w, h)
 
-    // Subtle cyber grid lines
-    ctx.strokeStyle = 'rgba(67, 231, 242, 0.08)'
-    ctx.lineWidth = 1
-    for (let i = 1; i <= 5; i += 1) {
-      const y = (h / 6) * i
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(w, y)
-      ctx.stroke()
+    // Glowing Nebula Clouds
+    const neb1 = ctx.createRadialGradient(w * 0.25, h * 0.35, 10, w * 0.25, h * 0.35, 240)
+    neb1.addColorStop(0, 'rgba(67, 231, 242, 0.14)')
+    neb1.addColorStop(1, 'rgba(4, 8, 20, 0)')
+    ctx.fillStyle = neb1
+    ctx.fillRect(0, 0, w, h)
+
+    const neb2 = ctx.createRadialGradient(w * 0.78, h * 0.45, 10, w * 0.78, h * 0.45, 220)
+    neb2.addColorStop(0, 'rgba(255, 107, 158, 0.12)')
+    neb2.addColorStop(1, 'rgba(4, 8, 20, 0)')
+    ctx.fillStyle = neb2
+    ctx.fillRect(0, 0, w, h)
+
+    // Multi-Layer Streaming Warp Starfield!
+    if (!prefs.reduceMotion) {
+      for (let s = 0; s < 42; s += 1) {
+        const sx = (s * 73 + 19) % w
+        const speed = 55 + (s % 4) * 45
+        const sy = (tSec * speed + s * 37) % h
+        const len = 3 + (s % 4) * 3.5
+        ctx.fillStyle = s % 3 === 0 ? 'rgba(185, 246, 108, 0.6)' : 'rgba(154, 220, 248, 0.65)'
+        ctx.fillRect(sx, sy, 2, len)
+      }
     }
 
     const activeHoverLane = findHitTargetLane(shipX)
     const shipPx = shipX * w
     const shipPy = h - 38
 
+    // Subtle Camera Shake on Laser Hit!
+    ctx.save()
+    if (laserBeam?.hit && !prefs.reduceMotion) {
+      ctx.translate(Math.sin(tSec * 90) * 3, Math.cos(tSec * 80) * 3)
+    }
+
     // Vertical laser sight line BEFORE targets so it connects ship to shield
     ctx.strokeStyle =
-      activeHoverLane !== null ? 'rgba(185, 246, 108, 0.68)' : 'rgba(67, 231, 242, 0.35)'
-    ctx.lineWidth = activeHoverLane !== null ? 2.4 : 1.5
+      activeHoverLane !== null ? 'rgba(185, 246, 108, 0.72)' : 'rgba(67, 231, 242, 0.35)'
+    ctx.lineWidth = activeHoverLane !== null ? 2.6 : 1.5
     ctx.setLineDash([7, 6])
     ctx.beginPath()
-    ctx.moveTo(shipPx, shipPy - 22)
-    ctx.lineTo(shipPx, 132)
+    ctx.moveTo(shipPx, shipPy - 24)
+    ctx.lineTo(shipPx, 134)
     ctx.stroke()
     ctx.setLineDash([])
 
-    // Draw 3 Large Target Shields (no duplicate HTML cards needed!)
+    // Draw 3 Hovering Sci-Fi Drone Shields!
     for (const box of TARGET_HITBOXES) {
       const opt = currentScheduled.options[box.lane]
       const x0 = box.minX * w
       const podW = (box.maxX - box.minX) * w
-      const podY = 18
-      const podH = 122
+      const bobY = prefs.reduceMotion ? 0 : Math.sin(tSec * 3.2 + box.lane * 1.6) * 4.5
+      const podY = 18 + bobY
+      const podH = 120
       const centerX = box.centerX * w
       const isLocked = activeHoverLane === box.lane
       const accent = opt.coreCode ? CORE_ACCENTS[opt.coreCode] : '#43E7F2'
+
+      // Drone Bottom Hover Thruster Flames
+      if (!prefs.reduceMotion) {
+        ctx.fillStyle = `${accent}88`
+        ctx.beginPath()
+        ctx.moveTo(x0 + 22, podY + podH)
+        ctx.lineTo(x0 + 28, podY + podH + 10 + Math.sin(tSec * 18 + box.lane) * 3)
+        ctx.lineTo(x0 + 34, podY + podH)
+        ctx.moveTo(x0 + podW - 34, podY + podH)
+        ctx.lineTo(x0 + podW - 28, podY + podH + 10 + Math.cos(tSec * 18 + box.lane) * 3)
+        ctx.lineTo(x0 + podW - 22, podY + podH)
+        ctx.fill()
+      }
 
       // Outer Target Shield Card
       ctx.save()
       if (isLocked) {
         ctx.shadowColor = accent
-        ctx.shadowBlur = 16
+        ctx.shadowBlur = 18
       }
-      ctx.fillStyle = isLocked ? '#162b44' : '#101a2b'
-      ctx.strokeStyle = isLocked ? accent : 'rgba(242, 246, 251, 0.28)'
+      ctx.fillStyle = isLocked ? '#172d48' : '#101a2c'
+      ctx.strokeStyle = isLocked ? accent : 'rgba(242, 246, 251, 0.3)'
       ctx.lineWidth = isLocked ? 3.5 : 1.8
       ctx.beginPath()
       ctx.roundRect(x0, podY, podW, podH, 14)
@@ -503,7 +542,7 @@ export function ShooterGame({
       ctx.stroke()
       ctx.restore()
 
-      // Top Shortcut Pill ("숫자 1번 / 클릭")
+      // Top Shortcut Pill
       ctx.fillStyle = isLocked ? accent : 'rgba(242, 246, 251, 0.12)'
       ctx.beginPath()
       ctx.roundRect(centerX - 66, podY + 10, 132, 22, 11)
@@ -532,13 +571,13 @@ export function ShooterGame({
       // Bottom Bullseye Connector Node
       ctx.fillStyle = isLocked ? '#B9F66C' : accent
       ctx.beginPath()
-      ctx.arc(centerX, podY + podH, isLocked ? 8 : 5.5, 0, Math.PI * 2)
+      ctx.arc(centerX, podY + podH, isLocked ? 8.5 : 5.5, 0, Math.PI * 2)
       ctx.fill()
 
       // Explosive Neon Hit Burst on Correct Shot!
       if (celebrateBurst && celebrateBurst.lane === box.lane) {
         ctx.save()
-        ctx.fillStyle = 'rgba(185, 246, 108, 0.24)'
+        ctx.fillStyle = 'rgba(185, 246, 108, 0.26)'
         ctx.strokeStyle = '#B9F66C'
         ctx.lineWidth = 4
         ctx.beginPath()
@@ -547,13 +586,19 @@ export function ShooterGame({
         ctx.stroke()
 
         if (!prefs.reduceMotion) {
-          for (let r = 0; r < 10; r += 1) {
-            const ang = (Math.PI * 2 * r) / 10
+          ctx.strokeStyle = 'rgba(67, 231, 242, 0.8)'
+          ctx.lineWidth = 3
+          ctx.beginPath()
+          ctx.arc(centerX, podY + 62, 54, 0, Math.PI * 2)
+          ctx.stroke()
+
+          for (let r = 0; r < 12; r += 1) {
+            const ang = (Math.PI * 2 * r) / 12
             ctx.strokeStyle = r % 2 === 0 ? '#B9F66C' : '#43E7F2'
             ctx.lineWidth = 3
             ctx.beginPath()
             ctx.moveTo(centerX + Math.cos(ang) * 28, podY + 62 + Math.sin(ang) * 20)
-            ctx.lineTo(centerX + Math.cos(ang) * 68, podY + 62 + Math.sin(ang) * 48)
+            ctx.lineTo(centerX + Math.cos(ang) * 72, podY + 62 + Math.sin(ang) * 52)
             ctx.stroke()
           }
         }
@@ -568,42 +613,115 @@ export function ShooterGame({
       }
     }
 
-    // Fired Laser Beam Effect
+    // Fired Laser Beam + Muzzle Flash (+ Twin Wingman Lasers when cleared!)
     if (laserBeam && !prefs.reduceMotion) {
       ctx.save()
       ctx.strokeStyle = laserBeam.hit ? '#B9F66C' : '#FFBD64'
       ctx.shadowColor = laserBeam.hit ? '#B9F66C' : '#FFBD64'
-      ctx.shadowBlur = 18
+      ctx.shadowBlur = 20
       ctx.lineWidth = 7
       ctx.beginPath()
-      ctx.moveTo(laserBeam.x * w, shipPy - 20)
+      ctx.moveTo(laserBeam.x * w, shipPy - 22)
       ctx.lineTo(laserBeam.x * w, laserBeam.hit ? 140 : 12)
       ctx.stroke()
+
+      if (isClearedBonusMode && laserBeam.hit) {
+        ctx.lineWidth = 3
+        ctx.strokeStyle = '#43E7F2'
+        ctx.beginPath()
+        ctx.moveTo(laserBeam.x * w - 42, shipPy - 8)
+        ctx.lineTo(laserBeam.x * w - 12, 140)
+        ctx.moveTo(laserBeam.x * w + 42, shipPy - 8)
+        ctx.lineTo(laserBeam.x * w + 12, 140)
+        ctx.stroke()
+      }
+
+      // Muzzle flash orb
+      ctx.fillStyle = '#FFFFFF'
+      ctx.beginPath()
+      ctx.arc(laserBeam.x * w, shipPy - 22, 9, 0, Math.PI * 2)
+      ctx.fill()
       ctx.restore()
     }
 
-    // Player Laser Cannon Ship
+    // Autonomous Escort Wingman Drones once 10점 Cleared!
+    if (isClearedBonusMode) {
+      for (const side of [-1, 1]) {
+        const wx = shipPx + side * 44
+        const wy = shipPy + 4 + (prefs.reduceMotion ? 0 : Math.sin(tSec * 6 + side) * 3)
+        ctx.fillStyle = '#B9F66C'
+        ctx.beginPath()
+        ctx.moveTo(wx, wy - 10)
+        ctx.lineTo(wx - 9, wy + 7)
+        ctx.lineTo(wx + 9, wy + 7)
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
+    // Twin-Wing Starfighter Ship with Afterburner Flame!
     ctx.save()
     ctx.translate(shipPx, shipPy)
-    ctx.fillStyle = activeHoverLane !== null ? '#B9F66C' : '#43E7F2'
-    ctx.strokeStyle = '#08131E'
+    const bankTilt = (shipX - 0.5) * 0.22
+    ctx.rotate(bankTilt)
+
+    // Dual Afterburner Thrusters
+    if (!prefs.reduceMotion) {
+      ctx.fillStyle = '#FF6B9E'
+      ctx.beginPath()
+      ctx.moveTo(-12, 14)
+      ctx.lineTo(-8, 26 + Math.sin(tSec * 24) * 4)
+      ctx.lineTo(-4, 14)
+      ctx.moveTo(4, 14)
+      ctx.lineTo(8, 26 + Math.cos(tSec * 24) * 4)
+      ctx.lineTo(12, 14)
+      ctx.fill()
+    }
+
+    // Swept Outer Wings
+    ctx.fillStyle = '#1d3c5e'
+    ctx.strokeStyle = activeHoverLane !== null ? '#B9F66C' : '#43E7F2'
     ctx.lineWidth = 2
     ctx.beginPath()
-    ctx.moveTo(0, -24)
-    ctx.lineTo(-24, 16)
-    ctx.lineTo(-8, 10)
-    ctx.lineTo(8, 10)
-    ctx.lineTo(24, 16)
+    ctx.moveTo(0, -14)
+    ctx.lineTo(-32, 16)
+    ctx.lineTo(-12, 12)
+    ctx.lineTo(12, 12)
+    ctx.lineTo(32, 16)
     ctx.closePath()
     ctx.fill()
     ctx.stroke()
 
+    // Fuselage Core
+    ctx.fillStyle = activeHoverLane !== null ? '#B9F66C' : '#43E7F2'
+    ctx.beginPath()
+    ctx.moveTo(0, -26)
+    ctx.lineTo(-14, 14)
+    ctx.lineTo(0, 9)
+    ctx.lineTo(14, 14)
+    ctx.closePath()
+    ctx.fill()
+
+    // Glowing Pilot Canopy
     ctx.fillStyle = '#F2F6FB'
     ctx.beginPath()
-    ctx.arc(0, -4, 5, 0, Math.PI * 2)
+    ctx.ellipse(0, -6, 4.5, 8, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
-  }, [celebrateBurst, currentScheduled, laserBeam, prefs.reduceMotion, shipX])
+
+    ctx.restore()
+  }, [
+    aimElapsedMs,
+    celebrateBurst,
+    correctCount,
+    currentScheduled,
+    isPractice,
+    laserBeam,
+    practiceElapsedMs,
+    prefs.reduceMotion,
+    questionIdx,
+    shipX,
+  ])
 
   const aimRemainingSec = Math.max(0, (aimLimitMs - aimElapsedMs) / 1000).toFixed(1)
   const timerRatio = Math.max(0, Math.min(1, 1 - aimElapsedMs / aimLimitMs))
@@ -615,6 +733,18 @@ export function ShooterGame({
       {/* Top HUD */}
       <div className="play-hud-bar" style={{ marginBottom: 0 }}>
         <div className="hud-metric">
+          <CoreBotMascot
+            mood={
+              cleared
+                ? 'crown'
+                : phase === 'celebrate'
+                  ? 'fever'
+                  : feedbackData
+                    ? 'danger'
+                    : 'cheer'
+            }
+            size={36}
+          />
           <span style={{ color: 'var(--text-muted)' }}>통과 기준 ({PASSING_SCORE}점)</span>
           <strong style={{ color: cleared ? 'var(--accent-clear)' : 'var(--accent-select)' }}>
             {isPractice
@@ -656,6 +786,8 @@ export function ShooterGame({
           )}
         </div>
       </div>
+
+      {!isPractice && <PassMilestoneBanner cleared={cleared} score={score} />}
 
       {/* Prominent High-Visibility Question Banner */}
       <section

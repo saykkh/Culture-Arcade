@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { getContentBundle } from '../../content'
 import { ArcadeHeader } from '../components/ArcadeHeader'
+import { ArcadeVideoBackdrop } from '../components/ArcadeVideoBackdrop'
+import { CabinetArtwork } from '../components/CabinetArtwork'
+import { CoreBotMascot } from '../components/CoreBotMascot'
 import { GAME_CATALOG, PASSING_SCORE, REQUIRED_GAME_ORDER } from '../domain/rules'
 import type {
   GameId,
@@ -19,6 +22,7 @@ import {
   type ParticipantMeResponse,
   type StartRunResponse,
 } from '../lib/api'
+import { useArcadePreferences } from '../lib/preferences'
 import { playArcadeSfx } from '../lib/sound'
 
 interface GameCabinetPageProps {
@@ -32,10 +36,35 @@ interface GameCabinetPageProps {
 type CabinetStage =
   | 'briefing'
   | 'practice'
+  | 'countdown'
   | 'playing'
   | 'saving'
   | 'save_error'
   | 'result'
+
+function RollingScoreNumber({ target }: { target: number }) {
+  const { prefs } = useArcadePreferences()
+  const [displayVal, setDisplayVal] = useState(() => (prefs.reduceMotion ? target : 0))
+
+  useEffect(() => {
+    if (prefs.reduceMotion) return
+    let rafId = 0
+    const startTs = performance.now()
+    const duration = 620
+    const step = (now: number) => {
+      const p = Math.min(1, (now - startTs) / duration)
+      const eased = 1 - Math.pow(1 - p, 3)
+      setDisplayVal(Math.round(target * eased))
+      if (p < 1) {
+        rafId = window.requestAnimationFrame(step)
+      }
+    }
+    rafId = window.requestAnimationFrame(step)
+    return () => window.cancelAnimationFrame(rafId)
+  }, [prefs.reduceMotion, target])
+
+  return <strong style={{ color: 'var(--accent-select)' }}>{prefs.reduceMotion ? target : displayVal}</strong>
+}
 
 function formatResultFeedback(
   result: FinalizeRunResponse,
@@ -160,6 +189,8 @@ function formatResultFeedback(
   }
 }
 
+const COUNTDOWN_STEPS = ['3', '2', '1', 'GO!'] as const
+
 export function GameCabinetPage({
   gameId,
   me,
@@ -167,11 +198,13 @@ export function GameCabinetPage({
   onNavigate,
   onLogout,
 }: GameCabinetPageProps) {
+  const { prefs } = useArcadePreferences()
   const meta = GAME_CATALOG[gameId]
   const implemented = isGameImplemented(gameId)
 
   const [selectedMode, setSelectedMode] = useState<GameMode>('standard')
   const [stage, setStage] = useState<CabinetStage>('briefing')
+  const [countdownIdx, setCountdownIdx] = useState(0)
   const [practiceStatus, setPracticeStatus] = useState<'active' | 'cleared' | 'time_up'>('active')
   const [practiceRunKey, setPracticeRunKey] = useState(1)
 
@@ -197,6 +230,23 @@ export function GameCabinetPage({
     document.addEventListener('fullscreenchange', onFsChange)
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
+
+  // 3 -> 2 -> 1 -> GO! Arcade Launch Sequence
+  useEffect(() => {
+    if (stage !== 'countdown') return
+    if (countdownIdx >= COUNTDOWN_STEPS.length - 1) {
+      playArcadeSfx('go')
+      const doneTimer = window.setTimeout(() => {
+        setStage('playing')
+      }, 340)
+      return () => window.clearTimeout(doneTimer)
+    }
+    playArcadeSfx('countdown')
+    const stepTimer = window.setTimeout(() => {
+      setCountdownIdx((i) => i + 1)
+    }, 390)
+    return () => window.clearTimeout(stepTimer)
+  }, [countdownIdx, stage])
 
   useEffect(() => {
     if (!activeRun || stage === 'result' || stage === 'briefing') {
@@ -245,7 +295,7 @@ export function GameCabinetPage({
         await document.exitFullscreen()
       }
     } catch {
-      // Ignore fullscreen denial in restricted browsers
+      // Ignore fullscreen denial
     }
   }
 
@@ -267,7 +317,12 @@ export function GameCabinetPage({
       setActiveRun(started)
       setFinalResult(null)
       setPendingPayload(null)
-      setStage('playing')
+      if (prefs.reduceMotion) {
+        setStage('playing')
+      } else {
+        setCountdownIdx(0)
+        setStage('countdown')
+      }
     } catch (err) {
       playArcadeSfx('wrong')
       setErrorMsg(
@@ -319,524 +374,628 @@ export function GameCabinetPage({
   }
 
   const gameProg = me.games.find((g) => g.gameId === gameId)
-  const isCompactMonitor = stage === 'playing' || stage === 'practice'
+  const isCompactMonitor = stage === 'playing' || stage === 'practice' || stage === 'countdown'
+  const showLiveStageBackdrop = stage === 'briefing' || stage === 'countdown' || stage === 'result'
 
   return (
-    <div className="arcade-shell">
-      <ArcadeHeader
-        me={me}
-        compact={isCompactMonitor}
-        onNavigate={onNavigate}
-        onLogout={() => void onLogout()}
-      />
+    <div className="arcade-shell has-backdrop" style={{ position: 'relative', overflow: 'hidden' }}>
+      <ArcadeVideoBackdrop intensity="vivid" />
 
-      <main className="play-cabinet-wrapper">
-        <div className="play-monitor-frame" ref={monitorRef}>
-          {/* Top Monitor Bezel Bar */}
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1, gap: 8 }}>
+        <ArcadeHeader
+          me={me}
+          compact={isCompactMonitor}
+          onNavigate={onNavigate}
+          onLogout={() => void onLogout()}
+        />
+
+        <main className="play-cabinet-wrapper">
           <div
+            className="play-monitor-frame"
+            ref={monitorRef}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 10,
-              gap: 10,
+              position: 'relative',
+              overflow: 'hidden',
+              borderColor: `${meta.accentColor}88`,
+              boxShadow: `0 0 32px ${meta.accentColor}22`,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="cabinet-badge-type">STAGE #{meta.socketIndex + 1}</span>
-              <strong style={{ fontSize: 18 }}>{meta.title}</strong>
-              {stage === 'playing' && activeRun && (
-                <span
-                  className="sample-pill"
+            {/* Full-Bleed Live Animated Stage Demo Backdrop during Briefing / Countdown / Result! */}
+            {showLiveStageBackdrop && (
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 0,
+                  opacity: stage === 'countdown' ? 0.52 : 0.34,
+                  pointerEvents: 'none',
+                }}
+              >
+                <CabinetArtwork gameId={gameId} />
+                <div
                   style={{
-                    borderColor: 'var(--accent-select)',
-                    color: 'var(--accent-select)',
-                    background: 'rgba(67,231,242,0.1)',
+                    position: 'absolute',
+                    inset: 0,
+                    background:
+                      'radial-gradient(circle at 50% 50%, rgba(8,13,24,0.35) 0%, rgba(8,13,24,0.84) 100%)',
                   }}
-                >
-                  {activeRun.mode === 'assisted' ? '여유롭게 도전 중' : '기본 속도 도전 중'}
-                </span>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                type="button"
-                className="btn-arcade btn-compact"
-                onClick={() => void toggleFullscreen()}
-              >
-                {isFullscreen ? '전체 화면 해제' : '⛶ 전체 화면'}
-              </button>
-              <button
-                type="button"
-                className="btn-arcade btn-compact"
-                onClick={() => onNavigate('/arcade')}
-              >
-                {stage === 'playing' ? '중단하고 로비로 (기존 기록 유지)' : '← 오락실 로비'}
-              </button>
-            </div>
-          </div>
-
-          {deadlineWarning && (
-            <div className="status-alert warn" style={{ marginBottom: 8 }}>
-              <span>⏳ {deadlineWarning}</span>
-            </div>
-          )}
-
-          {!implemented ? (
-            <div className="center-card-wrap" style={{ flexDirection: 'column', gap: 14 }}>
-              <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
-                <span className="sample-pill">개발 단계 준비 중</span>
-                <h2 style={{ margin: '12px 0 8px' }}>{meta.title} · 준비 중</h2>
-                <button
-                  type="button"
-                  className="btn-arcade btn-start"
-                  onClick={() => onNavigate('/arcade')}
-                >
-                  오락실 로비로 돌아가기
-                </button>
+                />
               </div>
-            </div>
-          ) : stage === 'briefing' ? (
-            /* 1) Visual 3-Step Pre-Game Participant Briefing */
-            <div className="center-card-wrap">
-              <div className="cabinet-modal-card" style={{ maxWidth: 720 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span className="cabinet-badge-type">
-                    STAGE #{meta.socketIndex + 1} / {REQUIRED_GAME_ORDER.length}
+            )}
+
+            <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1 }}>
+              {/* Top Monitor Bezel Bar */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 10,
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span
+                    className="cabinet-badge-type"
+                    style={{
+                      background: `${meta.accentColor}24`,
+                      color: meta.accentColor,
+                      border: `1px solid ${meta.accentColor}66`,
+                    }}
+                  >
+                    STAGE 0{meta.socketIndex + 1}
                   </span>
-                  {gameProg && (
-                    <span className="mono-num" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                      내 최고 기록: 기본 {gameProg.standardBestScore ?? '-'}점 · 여유{' '}
-                      {gameProg.assistedBestScore ?? '-'}점 ({gameProg.cleared ? '✓ 통과됨' : '미통과'})
+                  <strong style={{ fontSize: 18 }}>{meta.title}</strong>
+                  {stage === 'playing' && activeRun && (
+                    <span
+                      className="sample-pill"
+                      style={{
+                        borderColor: 'var(--accent-select)',
+                        color: 'var(--accent-select)',
+                        background: 'rgba(67,231,242,0.1)',
+                      }}
+                    >
+                      {activeRun.mode === 'assisted' ? '여유롭게 도전 중' : '기본 속도 도전 중'}
                     </span>
                   )}
                 </div>
 
-                <h1 style={{ margin: '0 0 14px', fontSize: 25 }}>{meta.title}</h1>
-
-                {/* Clear 3-Step Participant Guide */}
-                <div
-                  style={{
-                    display: 'grid',
-                    gap: 10,
-                    marginBottom: 18,
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: 9,
-                      background: '#111927',
-                      border: '1px solid rgba(67, 231, 242, 0.3)',
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-select)', marginBottom: 3 }}>
-                      🎯 1. 무엇을 하는 게임인가요?
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 700 }}>{meta.howToPlayOneLine}</div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div
-                      style={{
-                        padding: '11px 14px',
-                        borderRadius: 9,
-                        background: '#111927',
-                        border: '1px solid var(--border-subtle)',
-                      }}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-warn)', marginBottom: 3 }}>
-                        🕹️ 2. 조작 방법 · 시간
-                      </div>
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>{meta.controlsLabel}</div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
-                        소요 시간: {meta.expectedDurationLabel}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        padding: '11px 14px',
-                        borderRadius: 9,
-                        background: '#111927',
-                        border: '1px solid rgba(185, 246, 108, 0.3)',
-                      }}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-clear)', marginBottom: 3 }}>
-                        🏆 3. 통과 기준 & 랭킹 경쟁
-                      </div>
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>
-                        10점 달성 시 즉시 통과! (기본 +2점)
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
-                        10점 이후에도 끝까지 플레이해 TOP 10 고득점에 도전하세요!
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Speed Mode Selection */}
-                <div style={{ marginBottom: 18 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                    도전 속도 선택 (두 모드 모두 10점 달성 시 동일하게 케이블·배지 인정)
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <button
-                      type="button"
-                      className="btn-arcade"
-                      aria-pressed={selectedMode === 'standard'}
-                      style={{
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        padding: '12px 14px',
-                        borderColor:
-                          selectedMode === 'standard' ? 'var(--accent-select)' : undefined,
-                        background:
-                          selectedMode === 'standard'
-                            ? 'rgba(67, 231, 242, 0.14)'
-                            : undefined,
-                      }}
-                      onClick={() => {
-                        playArcadeSfx('select')
-                        setSelectedMode('standard')
-                      }}
-                    >
-                      <strong>⚡ 기본 속도 (정규 모드)</strong>
-                      <span style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'left' }}>
-                        기본 타이머·속도 · 정규 최고점 TOP 10 랭킹 반영
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="btn-arcade"
-                      aria-pressed={selectedMode === 'assisted'}
-                      style={{
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        padding: '12px 14px',
-                        borderColor:
-                          selectedMode === 'assisted' ? 'var(--accent-clear)' : undefined,
-                        background:
-                          selectedMode === 'assisted'
-                            ? 'rgba(185, 246, 108, 0.12)'
-                            : undefined,
-                      }}
-                      onClick={() => {
-                        playArcadeSfx('select')
-                        setSelectedMode('assisted')
-                      }}
-                    >
-                      <strong>🌿 여유롭게 도전 (지원 모드)</strong>
-                      <span style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'left' }}>
-                        {meta.assistedDiffLabel}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-
-                {errorMsg && (
-                  <div className="status-alert error" style={{ marginBottom: 12 }}>
-                    <span>✕ {errorMsg}</span>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button
                     type="button"
-                    className="btn-arcade"
-                    onClick={startPractice}
+                    className="btn-arcade btn-compact"
+                    onClick={() => void toggleFullscreen()}
                   >
-                    30초 연습 해보기
+                    {isFullscreen ? '전체 화면 해제' : '⛶ 전체 화면'}
                   </button>
                   <button
                     type="button"
-                    className="btn-arcade btn-start"
-                    style={{ fontSize: 16, padding: '10px 22px' }}
-                    onClick={() => void launchServerRun()}
-                  >
-                    본게임 바로 START ▶
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : stage === 'practice' ? (
-            /* 2) Optional 30-second single-goal Practice */
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
-              <div
-                className="status-alert"
-                style={{
-                  justifyContent: 'space-between',
-                  background: '#162232',
-                  border: '1px solid var(--accent-select)',
-                }}
-              >
-                <div>
-                  <strong>[연습 모드 · 기록 미반영]</strong> 목표: {meta.practiceGoalLabel}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {practiceStatus === 'time_up' && (
-                    <button
-                      type="button"
-                      className="btn-arcade btn-compact"
-                      onClick={startPractice}
-                    >
-                      다시 연습
-                    </button>
-                  )}
-                  <button
-                    ref={startRealBtnRef}
-                    type="button"
-                    className="btn-arcade btn-compact btn-start"
-                    onClick={() => void launchServerRun()}
-                  >
-                    {practiceStatus === 'active' ? '연습 건너뛰기 · 본게임 시작 ▶' : '본게임 시작 ▶'}
-                  </button>
-                </div>
-              </div>
-
-              <ActiveGameSlot
-                key={practiceRunKey}
-                gameId={gameId}
-                seed={202611 + practiceRunKey}
-                mode={selectedMode}
-                contentVersion={me.contentVersion}
-                isPractice={true}
-                onPracticeSuccess={() => {
-                  setPracticeStatus('cleared')
-                  window.setTimeout(() => startRealBtnRef.current?.focus(), 40)
-                }}
-                onPracticeTimeUp={() => {
-                  setPracticeStatus('time_up')
-                  window.setTimeout(() => startRealBtnRef.current?.focus(), 40)
-                }}
-                onFinishRound={() => {}}
-              />
-            </div>
-          ) : stage === 'playing' && activeRun ? (
-            /* 3) Official Server-Issued Game Round */
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-              <ActiveGameSlot
-                gameId={gameId}
-                seed={activeRun.seed}
-                mode={activeRun.mode}
-                contentVersion={activeRun.contentVersion}
-                isPractice={false}
-                onPracticeSuccess={() => {}}
-                onPracticeTimeUp={() => {}}
-                onFinishRound={(payload) => {
-                  void submitResultToServer(activeRun, payload)
-                }}
-              />
-            </div>
-          ) : stage === 'saving' ? (
-            <div className="center-card-wrap">
-              <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
-                <h2 style={{ marginTop: 0 }}>⏳ 결과 저장 중...</h2>
-                <p className="instruction-text">
-                  서버에서 점수와 통과 판정을 확정하고 있습니다.
-                </p>
-              </div>
-            </div>
-          ) : stage === 'save_error' ? (
-            <div className="center-card-wrap">
-              <div className="cabinet-modal-card">
-                <h2 style={{ marginTop: 0, color: 'var(--accent-warn)' }}>
-                  ▲ 결과 저장 대기 중
-                </h2>
-                <p className="instruction-text">{errorMsg}</p>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    type="button"
-                    className="btn-arcade btn-start"
-                    onClick={() => {
-                      if (activeRun && pendingPayload) {
-                        void submitResultToServer(activeRun, pendingPayload)
-                      }
-                    }}
-                  >
-                    다시 저장 시도
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-arcade"
+                    className="btn-arcade btn-compact"
                     onClick={() => onNavigate('/arcade')}
                   >
-                    로비로 이동 (대기 제출 유지)
+                    {stage === 'playing' ? '중단하고 로비로 (기존 기록 유지)' : '← 오락실 로비'}
                   </button>
                 </div>
               </div>
-            </div>
-          ) : finalResult ? (
-            (() => {
-              const fb = formatResultFeedback(finalResult, me.contentVersion)
-              const isAllFourCompleted =
-                finalResult.newlyEarnedBadge ||
-                (finalResult.cleared &&
-                  finalResult.requiredClearedCount === REQUIRED_GAME_ORDER.length)
-              const nextRecommendedId = finalResult.recommendation.targetGameId
 
-              return (
+              {deadlineWarning && (
+                <div className="status-alert warn" style={{ marginBottom: 8 }}>
+                  <span>⏳ {deadlineWarning}</span>
+                </div>
+              )}
+
+              {!implemented ? (
+                <div className="center-card-wrap" style={{ flexDirection: 'column', gap: 14 }}>
+                  <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
+                    <span className="sample-pill">개발 단계 준비 중</span>
+                    <h2 style={{ margin: '12px 0 8px' }}>{meta.title} · 준비 중</h2>
+                    <button
+                      type="button"
+                      className="btn-arcade btn-start"
+                      onClick={() => onNavigate('/arcade')}
+                    >
+                      오락실 로비로 돌아가기
+                    </button>
+                  </div>
+                </div>
+              ) : stage === 'briefing' ? (
+                /* 1) Dynamic Stage Intro Briefing with Mascot + Live Stage Backdrop */
                 <div className="center-card-wrap">
-                  <section className="cabinet-modal-card" style={{ maxWidth: 680 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <span
-                        className={`cabinet-status-tag ${finalResult.cleared ? 'cleared' : ''}`}
-                        style={
-                          !finalResult.cleared
-                            ? { background: 'rgba(255,189,100,0.18)', color: 'var(--accent-warn)' }
-                            : undefined
-                        }
-                      >
-                        {finalResult.cleared ? '✓ 서버 확정 · 통과 달성' : '▲ 서버 확정 · 미통과'}
-                      </span>
-                      <span className="mono-num" style={{ fontSize: 18 }}>
-                        이번 점수 <strong style={{ color: 'var(--accent-select)' }}>{finalResult.score}</strong>점 · 내 최고{' '}
-                        <strong>{finalResult.personalBestScore}</strong>점
-                      </span>
-                    </div>
-
-                    <h2 style={{ margin: '6px 0 8px', fontSize: 22 }}>{fb.achievedHeadline}</h2>
-                    {fb.deltaText && (
-                      <div style={{ fontSize: 14, color: 'var(--accent-select)', marginBottom: 8 }}>
-                        ↕ {fb.deltaText}
-                      </div>
-                    )}
-
+                  <div
+                    className="cabinet-modal-card"
+                    style={{
+                      maxWidth: 740,
+                      background: 'rgba(20, 29, 44, 0.9)',
+                      backdropFilter: 'blur(16px)',
+                      borderColor: `${meta.accentColor}88`,
+                      boxShadow: `0 20px 48px rgba(0,0,0,0.65), 0 0 28px ${meta.accentColor}26`,
+                    }}
+                  >
                     <div
                       style={{
-                        padding: '11px 14px',
-                        borderRadius: 8,
-                        background: '#131b28',
-                        border: '1px solid var(--border-subtle)',
-                        marginBottom: 16,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        flexWrap: 'wrap',
+                        marginBottom: 12,
                       }}
-                      className="instruction-text"
                     >
-                      <strong style={{ color: 'var(--accent-warn)' }}>다음 판 핵심 팁:</strong>{' '}
-                      {fb.nextActionTip}
+                      <CoreBotMascot
+                        mood={gameProg?.cleared ? 'crown' : 'cheer'}
+                        size={56}
+                        accentColor={meta.accentColor}
+                        speech={
+                          gameProg?.cleared
+                            ? `이미 통과한 스테이지네요! 이번엔 최고 기록 경신에 도전해 볼까요?`
+                            : `환영합니다! 10점만 달성하면 즉시 케이블이 점등되고, 끝까지 최고점 경쟁이 이어집니다!`
+                        }
+                      />
                     </div>
 
-                    {showAssistHelp && (
-                      <div className="status-alert clear" style={{ marginBottom: 14, justifyContent: 'space-between' }}>
-                        <span>
-                          <strong>여유롭게 도전 안내:</strong> {meta.assistedDiffLabel}
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+                      <h1 style={{ margin: 0, fontSize: 26, color: '#ffffff' }}>{meta.title}</h1>
+                      {gameProg && (
+                        <span className="mono-num" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                          내 최고: 기본 {gameProg.standardBestScore ?? '-'}점 · 여유{' '}
+                          {gameProg.assistedBestScore ?? '-'}점 ({gameProg.cleared ? '⚡통과됨' : '미통과'})
                         </span>
-                        <button
-                          type="button"
-                          className="btn-arcade btn-compact btn-clear-cta"
-                          onClick={() => void launchServerRun('assisted')}
-                        >
-                          여유롭게 도전으로 바로 시작 ▶
-                        </button>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-                      {finalResult.cleared ? (
-                        isAllFourCompleted ? (
-                          <button
-                            type="button"
-                            className="btn-arcade btn-clear-cta"
-                            onClick={() => onNavigate('/arcade')}
-                          >
-                            ★ 완성된 4종 간판 보기
-                          </button>
-                        ) : nextRecommendedId ? (
-                          <button
-                            type="button"
-                            className="btn-arcade btn-clear-cta"
-                            onClick={() => onNavigate(`/games/${nextRecommendedId}`)}
-                          >
-                            다음 게임 · {GAME_CATALOG[nextRecommendedId].title} ▶
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn-arcade btn-clear-cta"
-                            onClick={() => onNavigate('/arcade')}
-                          >
-                            오락실 로비로 이동 ▶
-                          </button>
-                        )
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="btn-arcade btn-start"
-                            onClick={() => void launchServerRun()}
-                          >
-                            다시 도전 ▶
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-arcade"
-                            onClick={() => setShowAssistHelp((v) => !v)}
-                          >
-                            여유 모드로 도움받기
-                          </button>
-                        </>
                       )}
+                    </div>
 
-                      {finalResult.cleared && (
+                    <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+                      <div
+                        style={{
+                          padding: '12px 14px',
+                          borderRadius: 9,
+                          background: 'rgba(11, 18, 30, 0.86)',
+                          border: `1px solid ${meta.accentColor}55`,
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 800, color: meta.accentColor, marginBottom: 3 }}>
+                          🎯 1. 무엇을 하는 게임인가요?
+                        </div>
+                        <div style={{ fontSize: 15.5, fontWeight: 700 }}>{meta.howToPlayOneLine}</div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div
+                          style={{
+                            padding: '11px 14px',
+                            borderRadius: 9,
+                            background: 'rgba(11, 18, 30, 0.86)',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-warn)', marginBottom: 3 }}>
+                            🕹️ 2. 조작 방법 · 시간
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>{meta.controlsLabel}</div>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                            소요 시간: {meta.expectedDurationLabel}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            padding: '11px 14px',
+                            borderRadius: 9,
+                            background: 'rgba(11, 18, 30, 0.86)',
+                            border: '1px solid rgba(185, 246, 108, 0.35)',
+                          }}
+                        >
+                          <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent-clear)', marginBottom: 3 }}>
+                            🏆 3. 통과 기준 & 보너스 타임
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>
+                            10점 달성 시 즉시 통과! (기본 +2점)
+                          </div>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                            통과 후에도 끝까지 점수를 쌓아 TOP 10에 도전하세요!
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13.5 }}>
+                        도전 속도 선택 (두 모드 모두 10점 달성 시 동일하게 케이블·배지 인정)
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                         <button
                           type="button"
                           className="btn-arcade"
-                          onClick={() => void launchServerRun()}
+                          aria-pressed={selectedMode === 'standard'}
+                          style={{
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            padding: '11px 14px',
+                            borderColor:
+                              selectedMode === 'standard' ? 'var(--accent-select)' : undefined,
+                            background:
+                              selectedMode === 'standard'
+                                ? 'rgba(67, 231, 242, 0.16)'
+                                : 'rgba(15, 22, 35, 0.8)',
+                          }}
+                          onClick={() => {
+                            playArcadeSfx('select')
+                            setSelectedMode('standard')
+                          }}
                         >
-                          고득점 재도전
+                          <strong>⚡ 기본 속도 (정규 모드)</strong>
+                          <span style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'left' }}>
+                            기본 타이머·속도 · 정규 최고점 TOP 10 랭킹 반영
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn-arcade"
+                          aria-pressed={selectedMode === 'assisted'}
+                          style={{
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            padding: '11px 14px',
+                            borderColor:
+                              selectedMode === 'assisted' ? 'var(--accent-clear)' : undefined,
+                            background:
+                              selectedMode === 'assisted'
+                                ? 'rgba(185, 246, 108, 0.14)'
+                                : 'rgba(15, 22, 35, 0.8)',
+                          }}
+                          onClick={() => {
+                            playArcadeSfx('select')
+                            setSelectedMode('assisted')
+                          }}
+                        >
+                          <strong>🌿 여유롭게 도전 (지원 모드)</strong>
+                          <span style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'left' }}>
+                            {meta.assistedDiffLabel}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {errorMsg && (
+                      <div className="status-alert error" style={{ marginBottom: 12 }}>
+                        <span>✕ {errorMsg}</span>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn-arcade"
+                        onClick={startPractice}
+                      >
+                        30초 연습 해보기
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-arcade btn-start landing-cta-pulse"
+                        style={{ fontSize: 16.5, padding: '11px 24px' }}
+                        onClick={() => void launchServerRun()}
+                      >
+                        ⚡ 본게임 바로 START ▶
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : stage === 'countdown' ? (
+                /* Arcade 3 · 2 · 1 · GO! Launch Screen */
+                <div
+                  className="center-card-wrap"
+                  onClick={() => setStage('playing')}
+                  style={{ flexDirection: 'column', gap: 14, cursor: 'pointer' }}
+                >
+                  <CoreBotMascot
+                    mood="fever"
+                    size={76}
+                    accentColor={meta.accentColor}
+                  />
+                  <div style={{ fontSize: 16, fontWeight: 800, color: meta.accentColor, letterSpacing: '0.1em' }}>
+                    STAGE 0{meta.socketIndex + 1} · {meta.title}
+                  </div>
+                  <div key={countdownIdx} className="countdown-zoom-digit">
+                    {COUNTDOWN_STEPS[countdownIdx]}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                    클릭하면 즉시 시작합니다
+                  </div>
+                </div>
+              ) : stage === 'practice' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
+                  <div
+                    className="status-alert"
+                    style={{
+                      justifyContent: 'space-between',
+                      background: '#162232',
+                      border: '1px solid var(--accent-select)',
+                    }}
+                  >
+                    <div>
+                      <strong>[연습 모드 · 기록 미반영]</strong> 목표: {meta.practiceGoalLabel}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {practiceStatus === 'time_up' && (
+                        <button
+                          type="button"
+                          className="btn-arcade btn-compact"
+                          onClick={startPractice}
+                        >
+                          다시 연습
                         </button>
                       )}
+                      <button
+                        ref={startRealBtnRef}
+                        type="button"
+                        className="btn-arcade btn-compact btn-start"
+                        onClick={() => void launchServerRun()}
+                      >
+                        {practiceStatus === 'active' ? '연습 건너뛰기 · 본게임 시작 ▶' : '본게임 시작 ▶'}
+                      </button>
+                    </div>
+                  </div>
 
+                  <ActiveGameSlot
+                    key={practiceRunKey}
+                    gameId={gameId}
+                    seed={202611 + practiceRunKey}
+                    mode={selectedMode}
+                    contentVersion={me.contentVersion}
+                    isPractice={true}
+                    onPracticeSuccess={() => {
+                      setPracticeStatus('cleared')
+                      window.setTimeout(() => startRealBtnRef.current?.focus(), 40)
+                    }}
+                    onPracticeTimeUp={() => {
+                      setPracticeStatus('time_up')
+                      window.setTimeout(() => startRealBtnRef.current?.focus(), 40)
+                    }}
+                    onFinishRound={() => {}}
+                  />
+                </div>
+              ) : stage === 'playing' && activeRun ? (
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                  <ActiveGameSlot
+                    gameId={gameId}
+                    seed={activeRun.seed}
+                    mode={activeRun.mode}
+                    contentVersion={activeRun.contentVersion}
+                    isPractice={false}
+                    onPracticeSuccess={() => {}}
+                    onPracticeTimeUp={() => {}}
+                    onFinishRound={(payload) => {
+                      void submitResultToServer(activeRun, payload)
+                    }}
+                  />
+                </div>
+              ) : stage === 'saving' ? (
+                <div className="center-card-wrap">
+                  <div className="cabinet-modal-card" style={{ textAlign: 'center' }}>
+                    <CoreBotMascot mood="fever" size={64} />
+                    <h2 style={{ marginTop: 10 }}>⏳ 결과 저장 중...</h2>
+                    <p className="instruction-text">
+                      서버에서 점수와 통과 판정을 확정하고 있습니다.
+                    </p>
+                  </div>
+                </div>
+              ) : stage === 'save_error' ? (
+                <div className="center-card-wrap">
+                  <div className="cabinet-modal-card">
+                    <h2 style={{ marginTop: 0, color: 'var(--accent-warn)' }}>
+                      ▲ 결과 저장 대기 중
+                    </h2>
+                    <p className="instruction-text">{errorMsg}</p>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button
+                        type="button"
+                        className="btn-arcade btn-start"
+                        onClick={() => {
+                          if (activeRun && pendingPayload) {
+                            void submitResultToServer(activeRun, pendingPayload)
+                          }
+                        }}
+                      >
+                        다시 저장 시도
+                      </button>
                       <button
                         type="button"
                         className="btn-arcade"
                         onClick={() => onNavigate('/arcade')}
                       >
-                        오락실 로비로
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn-arcade"
-                        onClick={() => onNavigate(`/leaderboard?game=${gameId}`)}
-                      >
-                        🏆 TOP 10 열기
+                        로비로 이동 (대기 제출 유지)
                       </button>
                     </div>
-
-                    <details
-                      style={{
-                        background: '#111722',
-                        borderRadius: 8,
-                        padding: '9px 12px',
-                        border: '1px solid var(--border-subtle)',
-                      }}
-                    >
-                      <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
-                        점수·배점 및 공식 문구 학습 해설 펼쳐 보기
-                      </summary>
-                      <ul style={{ margin: '10px 0 4px', paddingLeft: 18, display: 'grid', gap: 6 }}>
-                        {fb.commentaryLines.map((line, i) => (
-                          <li key={i} style={{ fontSize: 14, color: 'var(--text-muted)' }}>
-                            {line}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </section>
+                  </div>
                 </div>
-              )
-            })()
-          ) : null}
+              ) : finalResult ? (
+                (() => {
+                  const fb = formatResultFeedback(finalResult, me.contentVersion)
+                  const isAllFourCompleted =
+                    finalResult.newlyEarnedBadge ||
+                    (finalResult.cleared &&
+                      finalResult.requiredClearedCount === REQUIRED_GAME_ORDER.length)
+                  const nextRecommendedId = finalResult.recommendation.targetGameId
 
-          <div className="hud-key-footer">
-            <span>조작 안내: {meta.controlsLabel}</span>
-            <span>탭 전환 시 자동 일시 정지 · Esc 로비 복귀(대기/결과 화면)</span>
+                  return (
+                    <div className="center-card-wrap">
+                      <section
+                        className="cabinet-modal-card"
+                        style={{
+                          maxWidth: 700,
+                          background: 'rgba(20, 29, 44, 0.92)',
+                          backdropFilter: 'blur(16px)',
+                          borderColor: finalResult.cleared ? 'var(--accent-clear)' : 'var(--accent-warn)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                          <CoreBotMascot
+                            mood={
+                              isAllFourCompleted
+                                ? 'crown'
+                                : finalResult.cleared
+                                  ? 'fever'
+                                  : 'cheer'
+                            }
+                            size={58}
+                            speech={
+                              isAllFourCompleted
+                                ? '대단해요! 4종 케이블을 모두 연결해 마스터 배지를 달성했습니다!'
+                                : finalResult.cleared
+                                  ? '통과 성공! 멋진 실력이에요!'
+                                  : '아깝네요! 방금 감을 잡았으니 한 번 더 도전해 볼까요?'
+                            }
+                          />
+                          <span className="mono-num" style={{ fontSize: 20 }}>
+                            이번 점수 <RollingScoreNumber target={finalResult.score} />점 · 내 최고{' '}
+                            <strong>{finalResult.personalBestScore}</strong>점
+                          </span>
+                        </div>
+
+                        <h2 style={{ margin: '6px 0 8px', fontSize: 22 }}>{fb.achievedHeadline}</h2>
+                        {fb.deltaText && (
+                          <div style={{ fontSize: 14, color: 'var(--accent-select)', marginBottom: 8 }}>
+                            ↕ {fb.deltaText}
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            padding: '11px 14px',
+                            borderRadius: 8,
+                            background: 'rgba(13, 21, 34, 0.9)',
+                            border: '1px solid var(--border-subtle)',
+                            marginBottom: 16,
+                          }}
+                          className="instruction-text"
+                        >
+                          <strong style={{ color: 'var(--accent-warn)' }}>다음 판 핵심 팁:</strong>{' '}
+                          {fb.nextActionTip}
+                        </div>
+
+                        {showAssistHelp && (
+                          <div className="status-alert clear" style={{ marginBottom: 14, justifyContent: 'space-between' }}>
+                            <span>
+                              <strong>여유롭게 도전 안내:</strong> {meta.assistedDiffLabel}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn-arcade btn-compact btn-clear-cta"
+                              onClick={() => void launchServerRun('assisted')}
+                            >
+                              여유롭게 도전으로 바로 시작 ▶
+                            </button>
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+                          {finalResult.cleared ? (
+                            isAllFourCompleted ? (
+                              <button
+                                type="button"
+                                className="btn-arcade btn-clear-cta"
+                                onClick={() => onNavigate('/arcade')}
+                              >
+                                ★ 완성된 4종 마스터 인증서 보기 ▶
+                              </button>
+                            ) : nextRecommendedId ? (
+                              <button
+                                type="button"
+                                className="btn-arcade btn-clear-cta"
+                                onClick={() => onNavigate(`/games/${nextRecommendedId}`)}
+                              >
+                                다음 게임 · {GAME_CATALOG[nextRecommendedId].title} ▶
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn-arcade btn-clear-cta"
+                                onClick={() => onNavigate('/arcade')}
+                              >
+                                오락실 로비로 이동 ▶
+                              </button>
+                            )
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-arcade btn-start"
+                                onClick={() => void launchServerRun()}
+                              >
+                                다시 도전 ▶
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-arcade"
+                                onClick={() => setShowAssistHelp((v) => !v)}
+                              >
+                                여유 모드로 도움받기
+                              </button>
+                            </>
+                          )}
+
+                          {finalResult.cleared && (
+                            <button
+                              type="button"
+                              className="btn-arcade"
+                              onClick={() => void launchServerRun()}
+                            >
+                              고득점 재도전
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            className="btn-arcade"
+                            onClick={() => onNavigate('/arcade')}
+                          >
+                            오락실 로비로
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn-arcade"
+                            onClick={() => onNavigate(`/leaderboard?game=${gameId}`)}
+                          >
+                            🏆 TOP 10 열기
+                          </button>
+                        </div>
+
+                        <details
+                          style={{
+                            background: 'rgba(11, 17, 28, 0.88)',
+                            borderRadius: 8,
+                            padding: '9px 12px',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                            점수·배점 및 공식 문구 학습 해설 펼쳐 보기
+                          </summary>
+                          <ul style={{ margin: '10px 0 4px', paddingLeft: 18, display: 'grid', gap: 6 }}>
+                            {fb.commentaryLines.map((line, i) => (
+                              <li key={i} style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+                                {line}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      </section>
+                    </div>
+                  )
+                })()
+              ) : null}
+
+              <div className="hud-key-footer">
+                <span>조작 안내: {meta.controlsLabel}</span>
+                <span>탭 전환 시 자동 일시 정지 · Esc 로비 복귀(대기/결과 화면)</span>
+              </div>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

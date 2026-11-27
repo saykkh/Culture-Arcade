@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { ArcadeHeader } from '../components/ArcadeHeader'
 import { ArcadeVideoBackdrop } from '../components/ArcadeVideoBackdrop'
 import { CabinetArtwork } from '../components/CabinetArtwork'
+import { CoreBotMascot } from '../components/CoreBotMascot'
 import { formatParticipantCode, GAME_CATALOG, REQUIRED_GAME_ORDER } from '../domain/rules'
 import { arcadeApi, ClientApiError, type ParticipantMeResponse } from '../lib/api'
 import { useArcadePreferences } from '../lib/preferences'
@@ -98,7 +99,7 @@ export function CodeEntryPage({
   const featuredMeta = GAME_CATALOG[featuredGameId]
 
   return (
-    <div className="arcade-shell" style={{ position: 'relative', overflow: 'hidden' }}>
+    <div className="arcade-shell has-backdrop" style={{ position: 'relative', overflow: 'hidden' }}>
       <ArcadeVideoBackdrop intensity="vivid" />
 
       <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1, gap: 12 }}>
@@ -124,18 +125,13 @@ export function CodeEntryPage({
         <main className="landing-attract-grid">
           {/* Left Column: Flashy Arcade Hero & Live 4-Game Attract Showcase */}
           <section className="landing-hero-pane" aria-label="LS전선 Way 오락실 소개 및 4종 게임 프리뷰">
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <span className="neon-pulse-dot" />
-              <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 800,
-                  letterSpacing: '0.08em',
-                  color: 'var(--accent-select)',
-                }}
-              >
-                ARCADE ATTRACT MODE · 4 STAGES ONLINE
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <CoreBotMascot
+                mood="fever"
+                size={56}
+                accentColor={featuredMeta.accentColor}
+                speech="오락실에 오신 걸 환영해요! 12자리 코드로 바로 출발해 볼까요?"
+              />
             </div>
 
             <h1 className="landing-neon-title">
